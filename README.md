@@ -51,6 +51,13 @@ Add or remove identifiers to fit your workspace. Changes apply immediately.
 
 VS Code 1.106.1 or higher
 
+## Install From VSIX
+
+1. Download [yavcop-0.0.1.vsix](yavcop-0.0.1.vsix) or run `npm run package` to generate your own.
+2. In VS Code press `Ctrl+Shift+P` (`Cmd+Shift+P` on macOS) and choose `Extensions: Install from VSIX...`.
+3. Pick the downloaded/generated `.vsix` file and reload the editor when prompted.
+4. Alternatively, install via CLI with `code --install-extension yavcop-0.0.1.vsix`.
+
 ## License
 
 MIT
