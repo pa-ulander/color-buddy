@@ -39,6 +39,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.__testing = void 0;
 exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(__webpack_require__(1));
@@ -626,6 +627,12 @@ function refreshVisibleEditors() {
         void refreshEditor(editor);
     });
 }
+// Export selected internals for targeted unit tests.
+exports.__testing = {
+    parseColor,
+    getFormatPriority,
+    formatColorByFormat
+};
 
 
 /***/ }),
