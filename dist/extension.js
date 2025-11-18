@@ -631,7 +631,16 @@ function refreshVisibleEditors() {
 exports.__testing = {
     parseColor,
     getFormatPriority,
-    formatColorByFormat
+    formatColorByFormat,
+    collectColorData,
+    provideDocumentColors,
+    computeColorData,
+    ensureColorData,
+    getNativeColorRangeKeys,
+    registerLanguageProviders,
+    shouldDecorate,
+    colorDataCache,
+    pendingColorComputations
 };
 
 
