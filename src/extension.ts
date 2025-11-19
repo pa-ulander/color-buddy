@@ -650,15 +650,22 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                 markdown.supportHtml = true;
 
                 if (data.isCssVariable && data.variableName) {
-                    // Show CSS variable information (color swatch shown inline in code)
-                    markdown.appendMarkdown(`**CSS Variable Color**\n\n`);
-                    markdown.appendMarkdown(`\`${data.originalText}\`\n\n`);
-                    
-                    // Find all declarations (including theme variants)
+                    // Show CSS variable information with enhanced formatting
                     const declarations = cssVariableRegistry.get(data.variableName);
-                    if (declarations && declarations.length > 0) {
+                    
+                    if (!declarations || declarations.length === 0) {
+                        // Handle undefined variable
+                        markdown.appendMarkdown(`### ⚠️ CSS Variable Not Found\n\n`);
+                        markdown.appendMarkdown(`\`${data.originalText}\`\n\n`);
+                        markdown.appendMarkdown(`**Variable:** \`${data.variableName}\`\n\n`);
+                        markdown.appendMarkdown(`This variable is not defined in any CSS files in the workspace.\n\n`);
+                        markdown.appendMarkdown(`*Make sure the variable is declared in a CSS file.*`);
+                    } else {
+                        markdown.appendMarkdown(`### 🎨 CSS Variable Color\n\n`);
+                        markdown.appendMarkdown(`\`${data.originalText}\`\n\n`);
+                        
                         // Sort by specificity (root first, then themed variants)
-                        const sorted = declarations.sort((a, b) => a.context.specificity - b.context.specificity);
+                        const sorted = [...declarations].sort((a, b) => a.context.specificity - b.context.specificity);
                         
                         // Separate by theme
                         const rootDecl = sorted.find(d => d.context.type === 'root');
@@ -666,39 +673,98 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                         const lightDecl = sorted.find(d => d.context.themeHint === 'light');
                         
                         markdown.appendMarkdown(`**Variable:** \`${data.variableName}\`\n\n`);
+                        markdown.appendMarkdown(`---\n\n`);
                         
-                        // Show resolved values for different contexts
+                        // Show resolved values for different contexts with color swatches
                         if (rootDecl) {
                             const resolvedRoot = resolveNestedVariables(rootDecl.value);
-                            markdown.appendMarkdown(`**Default Value:** \`${resolvedRoot}\`\n\n`);
-                            markdown.appendMarkdown(`**Defined in:** \`${rootDecl.selector}\` at [${vscode.workspace.asRelativePath(rootDecl.uri)}:${rootDecl.line + 1}](${rootDecl.uri.toString()}#L${rootDecl.line + 1})\n\n`);
+                            const parsedRoot = parseColor(resolvedRoot);
+                            if (parsedRoot) {
+                                markdown.appendMarkdown(`<span style="display:inline-block;width:16px;height:16px;background-color:${parsedRoot.cssString};border:1px solid #999;margin-right:8px;vertical-align:middle;"></span>`);
+                            }
+                            markdown.appendMarkdown(`**Default:** \`${resolvedRoot}\`\n\n`);
+                            markdown.appendMarkdown(`📍 Defined in \`${rootDecl.selector}\` at [${vscode.workspace.asRelativePath(rootDecl.uri)}:${rootDecl.line + 1}](${rootDecl.uri.toString()}#L${rootDecl.line + 1})\n\n`);
                         }
                         
                         // Show light theme variant if available
                         if (lightDecl && lightDecl !== rootDecl) {
                             const resolvedLight = resolveNestedVariables(lightDecl.value);
-                            markdown.appendMarkdown(`☀️ **Light Theme:** \`${resolvedLight}\` (in \`${lightDecl.selector}\`)\n\n`);
+                            const parsedLight = parseColor(resolvedLight);
+                            if (parsedLight) {
+                                markdown.appendMarkdown(`<span style="display:inline-block;width:16px;height:16px;background-color:${parsedLight.cssString};border:1px solid #999;margin-right:8px;vertical-align:middle;"></span>`);
+                            }
+                            markdown.appendMarkdown(`**☀️ Light Theme:** \`${resolvedLight}\`\n\n`);
+                            markdown.appendMarkdown(`📍 Defined in \`${lightDecl.selector}\` at [${vscode.workspace.asRelativePath(lightDecl.uri)}:${lightDecl.line + 1}](${lightDecl.uri.toString()}#L${lightDecl.line + 1})\n\n`);
                         }
                         
                         // Show dark theme variant if available
                         if (darkDecl) {
                             const resolvedDark = resolveNestedVariables(darkDecl.value);
-                            markdown.appendMarkdown(`🌙 **Dark Theme:** \`${resolvedDark}\` (in \`${darkDecl.selector}\`)\n\n`);
+                            const parsedDark = parseColor(resolvedDark);
+                            if (parsedDark) {
+                                markdown.appendMarkdown(`<span style="display:inline-block;width:16px;height:16px;background-color:${parsedDark.cssString};border:1px solid #999;margin-right:8px;vertical-align:middle;"></span>`);
+                            }
+                            markdown.appendMarkdown(`**🌙 Dark Theme:** \`${resolvedDark}\`\n\n`);
+                            markdown.appendMarkdown(`📍 Defined in \`${darkDecl.selector}\` at [${vscode.workspace.asRelativePath(darkDecl.uri)}:${darkDecl.line + 1}](${darkDecl.uri.toString()}#L${darkDecl.line + 1})\n\n`);
                         }
                         
-                        // Show count of other contexts
-                        const otherContexts = declarations.length - [rootDecl, darkDecl, lightDecl].filter(Boolean).length;
-                        if (otherContexts > 0) {
-                            markdown.appendMarkdown(`**+${otherContexts} other context(s)**\n\n`);
+                        // Show all other definition locations
+                        const otherDecls = sorted.filter(d => d !== rootDecl && d !== darkDecl && d !== lightDecl);
+                        if (otherDecls.length > 0) {
+                            markdown.appendMarkdown(`---\n\n`);
+                            markdown.appendMarkdown(`**Other Definitions (${otherDecls.length}):**\n\n`);
+                            for (const decl of otherDecls) {
+                                const resolvedOther = resolveNestedVariables(decl.value);
+                                const parsedOther = parseColor(resolvedOther);
+                                if (parsedOther) {
+                                    markdown.appendMarkdown(`<span style="display:inline-block;width:16px;height:16px;background-color:${parsedOther.cssString};border:1px solid #999;margin-right:8px;vertical-align:middle;"></span>`);
+                                }
+                                markdown.appendMarkdown(`\`${resolvedOther}\` in \`${decl.selector}\` at [${vscode.workspace.asRelativePath(decl.uri)}:${decl.line + 1}](${decl.uri.toString()}#L${decl.line + 1})\n\n`);
+                            }
                         }
                         
-                        markdown.appendMarkdown(`*Click the file link to view the definition. The color swatch appears inline to the left.*`);
+                        markdown.appendMarkdown(`---\n\n`);
+                        markdown.appendMarkdown(`*Color swatch shown inline. Click file links to view definitions.*`);
                     }
                 } else {
-                    // Show regular color information
-                    markdown.appendMarkdown(`**Color Preview**\n\n`);
-                    markdown.appendMarkdown(`<span style="display:inline-block;width:20px;height:20px;background-color:${data.normalizedColor};border:1px solid #000;vertical-align:middle;"></span> \`${data.originalText}\``);
-                    markdown.appendMarkdown(`\n\n*Click the color value to open VS Code's color picker.*`);
+                    // Show regular color information with format details
+                    markdown.appendMarkdown(`### 🎨 Color Preview\n\n`);
+                    markdown.appendMarkdown(`<span style="display:inline-block;width:24px;height:24px;background-color:${data.normalizedColor};border:1px solid #999;margin-right:8px;vertical-align:middle;"></span>`);
+                    markdown.appendMarkdown(`\`${data.originalText}\`\n\n`);
+                    
+                    // Detect format type
+                    let formatType = 'Unknown';
+                    if (data.originalText.startsWith('#')) {
+                        formatType = 'Hex';
+                    } else if (data.originalText.startsWith('rgb')) {
+                        formatType = 'RGB/RGBA';
+                    } else if (data.originalText.startsWith('hsl')) {
+                        formatType = 'HSL/HSLA';
+                    } else if (/^\d+(\.\d+)?\s+\d+(\.\d+)?%\s+\d+(\.\d+)?%/.test(data.originalText)) {
+                        formatType = 'Tailwind HSL';
+                    }
+                    
+                    markdown.appendMarkdown(`**Format:** ${formatType}\n\n`);
+                    
+                    // Show normalized value if different from original
+                    if (data.normalizedColor !== data.originalText) {
+                        markdown.appendMarkdown(`**Normalized:** \`${data.normalizedColor}\`\n\n`);
+                    }
+                    
+                    // Show RGB values
+                    const r = Math.round(data.vscodeColor.red * 255);
+                    const g = Math.round(data.vscodeColor.green * 255);
+                    const b = Math.round(data.vscodeColor.blue * 255);
+                    const a = data.vscodeColor.alpha;
+                    
+                    markdown.appendMarkdown(`**RGB:** ${r}, ${g}, ${b}`);
+                    if (a < 1) {
+                        markdown.appendMarkdown(` (α: ${a.toFixed(2)})`);
+                    }
+                    markdown.appendMarkdown(`\n\n`);
+                    
+                    markdown.appendMarkdown(`---\n\n`);
+                    markdown.appendMarkdown(`*Click the color value to open VS Code's color picker for conversions and adjustments.*`);
                 }
 
                 return new vscode.Hover(markdown, data.range);
