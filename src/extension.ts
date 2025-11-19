@@ -851,9 +851,7 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                                 }
                             }
                         }
-                        
-                        markdown.appendMarkdown(`---\n\n`);
-                        markdown.appendMarkdown(`*Color swatches are shown for each context. Click file links to view definitions.*`);
+
                     }
                 } else {
                     // Show regular color information with format details
