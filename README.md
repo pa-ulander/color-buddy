@@ -1,16 +1,8 @@
 [![Tests](https://github.com/pa-ulander/yavcop/actions/workflows/tests.yml/badge.svg)](https://github.com/pa-ulander/yavcop/actions/workflows/tests.yml) ![](https://ghvc.kabelkultur.se?username=pa-ulander&label=Repository%20visits&color=brightgreen&style=flat&repository=yavcop)
 
-# ColorCaddy - .....
-# ColorBuddy - .....
-# ColorAnalyst - ...
+# ColorBuddy - Your handy asisstant when working with colors
 
-A universal color intelligence toolkit for VS Code. Instantly highlights, previews, and analyzes color codes, CSS variables, and Tailwind classes across dozens of languages—even within code, markup, config, and Markdown. Dive deep into palette management, accessibility checks, and custom variable tracing for any workspace.
-
-Adds a color indicator and color picker to any dockument, such as:
-* css (also Tailwind CSS custom properties)
-* scss, sass, html, js, md ...and so on.  
-* Add or remove languages in config.
-
+A universal color intelligence toolkit for VS Code. Instantly highlights, previews, and analyzes color codes, CSS variables, and Tailwind classes across dozens of languages  within code, markup, config, and Markdown. Dives deep into palette management, accessibility checks, and custom variable tracing for your workspace.
 
 ## Features
 
