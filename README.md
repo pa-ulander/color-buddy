@@ -1,6 +1,6 @@
 [![Tests](https://github.com/pa-ulander/yavcop/actions/workflows/tests.yml/badge.svg)](https://github.com/pa-ulander/yavcop/actions/workflows/tests.yml) ![](https://ghvc.kabelkultur.se?username=pa-ulander&label=Repository%20visits&color=brightgreen&style=flat&repository=yavcop)
 
-# YAVCOP - yet-another-vscode-color-picker
+## ColorBuddy - Makes color management suck less
 
 Adds a color indicator and mouseover information anywhere a common color code is found in text or code. Makes color management suck less.
 
@@ -12,8 +12,7 @@ Adds a color indicator and mouseover information anywhere a common color code is
 *   **Configurable language support** via the `yavcop.languages` setting
 *   **Tailwind compact HSL support** in addition to hex, rgb/rgba, and hsl/hsla
 
-<img src="/img/color-preview.png" />
-<img src="/img/tailwind-color-class-preview.png" />
+<img src="/img/color-preview.png" width="50%" /><img src="/img/tailwind-color-class-preview.png" width="50%" />
 
 ## Usage
 
