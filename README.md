@@ -13,7 +13,7 @@ Adds a color indicator and mouseover information anywhere a common color code is
 *   **Tailwind compact HSL support** in addition to hex, rgb/rgba, and hsl/hsla
 
 <img src="/img/color-preview.png" />
-<img src="/img/tailwind-color-preview.png" />
+<img src="/img/tailwind-color-class-preview.png" />
 
 ## Usage
 
