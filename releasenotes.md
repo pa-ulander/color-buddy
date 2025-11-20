@@ -1,4 +1,48 @@
-# ColorBuddy v0.0.1 - Release Notes
+# ColorBuddy Release Notes
+
+---
+
+## Version 0.0.2 - November 20, 2025
+
+### Rebranding & Polish Release
+
+This release focuses on establishing ColorBuddy's identity and improving the visual presentation of the extension.
+
+### What Changed
+
+**Complete Rebranding**
+- Renamed from "YAVCOP" to **ColorBuddy – Your VS Code Color Companion**
+- Updated all command names from `yavcop.*` to `colorbuddy.*`:
+  - `colorbuddy.reindexCSSFiles` - Re-index CSS Variables
+  - `colorbuddy.showColorPalette` - Show Workspace Color Palette
+- Updated internal logging and references throughout the codebase
+- Improved extension metadata and marketplace presence
+
+**Visual Assets & Documentation**
+- Added professional extension icon for VS Code marketplace
+- Added banner image for enhanced marketplace listing
+- Added screenshot and color preview images for better feature showcase
+- Updated README with relative image paths for improved portability
+- Enhanced documentation structure
+
+**Housekeeping**
+- Removed unused files from development
+- Updated `.gitignore` configuration to properly track image assets
+- Cleaned up project structure
+
+### Why This Matters
+
+This release establishes ColorBuddy's brand identity and improves discoverability in the VS Code marketplace. The new visual assets and clearer naming make it easier for users to understand what the extension does at a glance.
+
+### Upgrading
+
+No action required. The extension will automatically update, and all functionality remains the same. Note that command names have changed from `yavcop.*` to `colorbuddy.*`, so if you have any keyboard shortcuts or custom scripts using the old command names, you'll need to update them.
+
+---
+
+## Version 0.0.1 - November 20, 2025
+
+### Initial Release
 
 **Release Date:** November 20, 2025
 
@@ -144,6 +188,3 @@ We'd love to hear from you! If you have suggestions, feature requests, or encoun
 
 MIT License - See LICENSE file for details
 
----
-
-**Thank you for using ColorBuddy!** We hope it makes working with colors in VS Code more delightful and productive.
