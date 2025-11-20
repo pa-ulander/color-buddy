@@ -1,6 +1,6 @@
-[![Tests](https://github.com/pa-ulander/yavcop/actions/workflows/tests.yml/badge.svg)](https://github.com/pa-ulander/yavcop/actions/workflows/tests.yml) ![](https://ghvc.kabelkultur.se?username=pa-ulander&label=Repository%20visits&color=brightgreen&style=flat&repository=yavcop)
+[![Tests](https://github.com/pa-ulander/color-buddy/actions/workflows/tests.yml/badge.svg)](https://github.com/pa-ulander/color-buddy/actions/workflows/tests.yml) ![](https://ghvc.kabelkultur.se?username=pa-ulander&label=Repository%20visits&color=brightgreen&style=flat&repository=color-buddy)
 
-<img src="https://github.com/pa-ulander/yavcop/blob/main/img/banner.png" width="100%" />
+<img src="https://github.com/pa-ulander/color-buddy/blob/main/img/banner.png" width="100%" />
 
 ## ColorBuddy - Makes color management easy in VS Code 
 
@@ -11,17 +11,17 @@ Adds color indicators and mouseover information anywhere a common color code is 
 *   **Inline color indicator** right beside each detected color value
 *   **Mouseover preview** that shows the selected color and instructions
 *   **Native VS Code color picker** available on click for supported values
-*   **Configurable language support** via the `yavcop.languages` setting
+*   **Configurable language support** via the `colorbuddy.languages` setting
 *   **Tailwind compact HSL support** in addition to hex, rgb/rgba, and hsl/hsla
 
-<img src="https://github.com/pa-ulander/yavcop/blob/main/img/color-preview.png" width="49%" /> &nbsp; <img src="https://github.com/pa-ulander/yavcop/blob/main/img/tailwind-color-class-preview.png" width="49%" />
+<img src="https://github.com/pa-ulander/color-buddy/blob/main/img/color-preview.png" width="49%" /> &nbsp; <img src="https://github.com/pa-ulander/color-buddy/blob/main/img/tailwind-color-class-preview.png" width="49%" />
 
 ## Usage
 
-1.  Open any file in a language covered by `yavcop.languages` (defaults include CSS, HTML, JS/TS, Markdown, and more)
+1.  Open any file in a language covered by `colorbuddy.languages` (defaults include CSS, HTML, JS/TS, Markdown, and more)
 2.  Look for the inline color indicator next to recognized color codes
 3.  Click the color value (or use the hover link) to launch VS Code's color picker
-4.  Choose a new color; YAVCOP keeps the original format when possible
+4.  Choose a new color; ColorBuddy keeps the original format when possible
 
 ## Supported Color Formats
 
@@ -32,10 +32,10 @@ Adds color indicators and mouseover information anywhere a common color code is 
 
 ## Configuration
 
-*   `yavcop.languages`: array of VS Code language identifiers that YAVCOP should scan. Edit it from the Settings UI or add to your `settings.json`:
+*   `colorbuddy.languages`: array of VS Code language identifiers that ColorBuddy should scan. Edit it from the Settings UI or add to your `settings.json`:
 
 ```
-"yavcop.languages": [
+"colorbuddy.languages": [
   "css",
   "scss",
   "sass",
@@ -64,10 +64,10 @@ Add or remove identifiers to fit your workspace. Use `"*"` to enable color detec
 This extension is a work in progress, and it is not yet on the VS Code Marketplace.  
 To install it manually:
 
-1.  Download [yavcop-0.0.1.vsix](yavcop-0.0.1.vsix) or run `npm run package` to generate your own.
+1.  Download [color-buddy-0.0.1.vsix](color-buddy-0.0.1.vsix) or run `npm run package` to generate your own.
 2.  In VS Code press `Ctrl+Shift+P` (`Cmd+Shift+P` on macOS) and choose `Extensions: Install from VSIX...`.
 3.  Pick the downloaded/generated `.vsix` file and reload the editor when prompted.
-4.  Alternatively, install via CLI with `code --install-extension yavcop-0.0.1.vsix`.
+4.  Alternatively, install via CLI with `code --install-extension color-buddy-0.0.1.vsix`.
 
 ## Requirements
 
