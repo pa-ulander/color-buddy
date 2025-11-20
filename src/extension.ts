@@ -1,11 +1,11 @@
 import * as vscode from 'vscode';
 
 process.on('uncaughtException', error => {
-    console.error('[yavcop] uncaught exception', error);
+    console.error('[cb] uncaught exception', error);
 });
 
 process.on('unhandledRejection', reason => {
-    console.error('[yavcop] unhandled rejection', reason);
+    console.error('[cb] unhandled rejection', reason);
 });
 
 interface DocumentColorCache {
@@ -113,7 +113,7 @@ const DEFAULT_LANGUAGES = [
 ];
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('[yavcop] activating...');
+    console.log('[cb] activating...');
 
     // Index CSS files for variable definitions first (before registering providers)
     const indexingPromise = indexWorkspaceCSSFiles();
@@ -152,21 +152,21 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Wait for indexing to complete, then register providers and refresh
     void indexingPromise.then(() => {
-        console.log('[yavcop] Initial indexing complete, registering providers');
+        console.log('[cb] Initial indexing complete, registering providers');
         registerLanguageProviders(context);
         refreshVisibleEditors();
     });
 
     // Register command to re-index CSS files (useful for debugging)
-    const reindexCommand = vscode.commands.registerCommand('yavcop.reindexCSSFiles', async () => {
+    const reindexCommand = vscode.commands.registerCommand('colorbuddy.reindexCSSFiles', async () => {
         await indexWorkspaceCSSFiles();
         refreshVisibleEditors();
-        void vscode.window.showInformationMessage(`YAVCOP: Re-indexed ${cssVariableRegistry.size} CSS variables`);
+        void vscode.window.showInformationMessage(`ColorBuddy: Re-indexed ${cssVariableRegistry.size} CSS variables`);
     });
     context.subscriptions.push(reindexCommand);
 
     // Register command to show color palette
-    const showPaletteCommand = vscode.commands.registerCommand('yavcop.showColorPalette', () => {
+    const showPaletteCommand = vscode.commands.registerCommand('colorbuddy.showColorPalette', () => {
         const palette = extractWorkspaceColorPalette();
         const items = Array.from(palette.entries()).map(([colorString, color]) => {
             const r = Math.round(color.red * 255);
@@ -206,7 +206,7 @@ export function activate(context: vscode.ExtensionContext) {
             clearColorCacheForDocument(document);
         }),
         vscode.workspace.onDidChangeConfiguration(event => {
-            if (event.affectsConfiguration('yavcop.languages')) {
+            if (event.affectsConfiguration('colorbuddy.languages')) {
                 registerLanguageProviders(context);
                 refreshVisibleEditors();
             }
@@ -228,12 +228,12 @@ async function refreshEditor(editor: vscode.TextEditor): Promise<void> {
         const colorData = await ensureColorData(editor.document);
         applyCSSVariableDecorations(editor, colorData);
     } catch (error) {
-        console.error('[yavcop] failed to refresh color data', error);
+        console.error('[cb] failed to refresh color data', error);
     }
 }
 
 function shouldDecorate(document: vscode.TextDocument): boolean {
-    const config = vscode.workspace.getConfiguration('yavcop');
+    const config = vscode.workspace.getConfiguration('colorbuddy');
     const languages = config.get<string[]>('languages', DEFAULT_LANGUAGES);
     if (!languages || languages.length === 0) {
         return false;
@@ -308,7 +308,7 @@ async function getNativeColorRangeKeys(document: vscode.TextDocument): Promise<S
 
         return new Set(colorInfos.map(info => rangeKey(info.range)));
     } catch (error) {
-        console.warn('[yavcop] native color provider probe failed', error);
+        console.warn('[cb] native color provider probe failed', error);
         return new Set();
     } finally {
         isProbingNativeColors = false;
@@ -542,7 +542,7 @@ function analyzeContext(selector: string): CSSVariableContext {
     };
 }
 async function indexWorkspaceCSSFiles(): Promise<void> {
-    console.log('[yavcop] Indexing CSS files for variable definitions...');
+    console.log('[cb] Indexing CSS files for variable definitions...');
     cssVariableRegistry.clear();
     cssClassColorRegistry.clear();
 
@@ -553,7 +553,7 @@ async function indexWorkspaceCSSFiles(): Promise<void> {
             const document = await vscode.workspace.openTextDocument(fileUri);
             await parseCSSFile(document);
         } catch (error) {
-            console.error(`[yavcop] Error parsing CSS file ${fileUri.fsPath}:`, error);
+            console.error(`[cb] Error parsing CSS file ${fileUri.fsPath}:`, error);
         }
     }
 }
@@ -572,7 +572,7 @@ function resolveNestedVariables(
         
         // Circular reference detection
         if (visitedVars.has(nestedVarName)) {
-            console.error(`[yavcop] Circular reference detected: ${nestedVarName}`);
+            console.error(`[cb] Circular reference detected: ${nestedVarName}`);
             return value; // Return original value to avoid infinite loop
         }
         
@@ -1078,7 +1078,7 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
             }
         }
     } catch (error) {
-        console.error('[yavcop] failed to provide hover', error);
+        console.error('[cb] failed to provide hover', error);
     }
 
     return undefined;
@@ -1119,7 +1119,7 @@ async function provideDocumentColors(document: vscode.TextDocument): Promise<vsc
             .filter(data => !data.isCssVariable && !data.isCssClass)
             .map(data => new vscode.ColorInformation(data.range, data.vscodeColor));
     } catch (error) {
-        console.error('[yavcop] failed to provide document colors', error);
+        console.error('[cb] failed to provide document colors', error);
         return [];
     }
 }
@@ -1503,7 +1503,7 @@ function registerLanguageProviders(context: vscode.ExtensionContext) {
     providerSubscriptions.forEach(disposable => disposable.dispose());
     providerSubscriptions = [];
 
-    const config = vscode.workspace.getConfiguration('yavcop');
+    const config = vscode.workspace.getConfiguration('colorbuddy');
     const languages = config.get<string[]>('languages', DEFAULT_LANGUAGES);
 
     if (!languages || languages.length === 0) {
