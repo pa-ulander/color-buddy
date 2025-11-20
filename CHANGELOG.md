@@ -26,6 +26,23 @@ All notable changes to the **ColorBuddy** extension will be documented in this f
 - Excluded CSS variables and CSS class colors from color picker (shown in tooltips only)
 - Enhanced color detection to include CSS class names in HTML/JSX `class` attributes
 
+## [0.0.2] - 2025-11-20
+
+### Changed
+- Complete rebranding from "YAVCOP" to "ColorBuddy – Your VS Code Color Companion"
+  - Updated extension name, display name, and all references throughout the codebase
+  - Updated command names from `yavcop.*` to `colorbuddy.*`
+  - Updated logging and internal references to use new branding
+- Improved visual assets and branding
+  - Added new extension icon (`logoicon.png`)
+  - Added banner image for marketplace listing
+  - Added screenshot (`screen1.png`) and color preview image (`color_preview.png`)
+  - Updated README to use relative image paths for better portability
+
+### Fixed
+- Cleaned up unused files from previous iterations
+- Updated `.gitignore` to properly track image assets
+
 ## [0.0.1] - 2025-11-20
 
 ### Added
