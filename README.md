@@ -2,7 +2,7 @@
 
 <img src="https://github.com/pa-ulander/color-buddy/blob/main/img/banner.png" width="100%" />
 
-## ColorBuddy - Makes color management easy in VS Code 
+## ColorBuddy - Your VS Code Color Companion
 
 Adds color indicators and mouseover information anywhere a common color code is found in text or code. Find color definitions fast just like you are used to, and manage refactoring and accessability with ease.
 
