@@ -19,10 +19,6 @@
     "design"
   ],
   "icon": "img/logoicon.png",
-  "galleryBanner": {
-    "color": "#00892e",
-    "theme": "dark"
-  },
   "engines": {
     "vscode": "^1.106.1"
   },
