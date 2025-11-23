@@ -205,6 +205,7 @@ class ExtensionController implements vscode.Disposable {
             }),
             vscode.workspace.onDidChangeConfiguration(event => {
                 if (event.affectsConfiguration('colorbuddy.languages')) {
+                    this.stateManager.clearLanguageCache();
                     this.registerLanguageProviders();
                     this.refreshVisibleEditors();
                 }
@@ -218,8 +219,7 @@ class ExtensionController implements vscode.Disposable {
     private registerLanguageProviders(): void {
         this.stateManager.clearProviderSubscriptions();
 
-        const config = vscode.workspace.getConfiguration('colorbuddy');
-        const languages = config.get<string[]>('languages', DEFAULT_LANGUAGES);
+        const languages = this.getConfiguredLanguages();
 
         if (!languages || languages.length === 0) {
             return;
@@ -236,7 +236,7 @@ class ExtensionController implements vscode.Disposable {
 
         const colorProvider = vscode.languages.registerColorProvider(selector, {
             provideDocumentColors: async (document) => {
-                if (this.stateManager.isProbingNativeColors) {
+                if (this.stateManager.isDocumentProbing(document.uri)) {
                     return [];
                 }
                 const colorData = await this.ensureColorData(document);
@@ -302,8 +302,7 @@ class ExtensionController implements vscode.Disposable {
      * Determine if a document should have color decorations.
      */
     private shouldDecorate(document: vscode.TextDocument): boolean {
-        const config = vscode.workspace.getConfiguration('colorbuddy');
-        const languages = config.get<string[]>('languages', DEFAULT_LANGUAGES);
+        const languages = this.getConfiguredLanguages();
         
         if (!languages || languages.length === 0) {
             return false;
@@ -353,11 +352,11 @@ class ExtensionController implements vscode.Disposable {
      * Get native color provider ranges to avoid duplicates.
      */
     private async getNativeColorRangeKeys(document: vscode.TextDocument): Promise<Set<string>> {
-        if (this.stateManager.isProbingNativeColors) {
+        if (this.stateManager.isDocumentProbing(document.uri)) {
             return new Set();
         }
 
-        this.stateManager.isProbingNativeColors = true;
+        this.stateManager.startNativeColorProbe(document.uri);
         try {
             const colorInfos = await vscode.commands.executeCommand<vscode.ColorInformation[] | undefined>(
                 'vscode.executeDocumentColorProvider',
@@ -373,7 +372,7 @@ class ExtensionController implements vscode.Disposable {
             console.warn(`${LOG_PREFIX} native color provider probe failed`, error);
             return new Set();
         } finally {
-            this.stateManager.isProbingNativeColors = false;
+            this.stateManager.finishNativeColorProbe(document.uri);
         }
     }
 
@@ -498,7 +497,7 @@ class ExtensionController implements vscode.Disposable {
             }
 
             for (const decl of declarations) {
-                const resolved = this.cssParser.resolveNestedVariables(decl.value);
+                const resolved = decl.resolvedValue ?? this.cssParser.resolveNestedVariables(decl.value);
                 const parsed = this.colorParser.parseColor(resolved);
                 if (parsed) {
                     palette.set(parsed.cssString, parsed.vscodeColor);
@@ -507,6 +506,19 @@ class ExtensionController implements vscode.Disposable {
         }
 
         return palette;
+    }
+
+    private getConfiguredLanguages(): string[] {
+        const cached = this.stateManager.getCachedLanguages();
+        if (cached) {
+            return cached;
+        }
+
+        const config = vscode.workspace.getConfiguration('colorbuddy');
+        const languages = config.get<string[]>('languages', DEFAULT_LANGUAGES) ?? DEFAULT_LANGUAGES;
+        const normalized = Array.isArray(languages) ? [...languages] : [...DEFAULT_LANGUAGES];
+        this.stateManager.setCachedLanguages(normalized);
+        return normalized;
     }
 
     /**
