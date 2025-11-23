@@ -29,6 +29,9 @@ export const COLOR_SWATCH_MARGIN = '1px 4px 0 0';
 /** Border style for color swatch decorations */
 export const COLOR_SWATCH_BORDER = '1px solid #fff';
 
+/** Content text used for color swatch decorations */
+export const COLOR_SWATCH_CONTENT = ' ';
+
 /** Default border color for SVG color swatches */
 export const SVG_SWATCH_STROKE = 'white';
 
