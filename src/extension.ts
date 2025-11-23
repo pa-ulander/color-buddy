@@ -557,15 +557,4 @@ export function deactivate(): void {
     controller?.dispose();
     controller = null;
 }
-
-/**
- * Export selected internals for targeted unit tests.
- * These should only be used in test files.
- */
-export const __testing = {
-    ExtensionController,
-    createController: (context: vscode.ExtensionContext) => new ExtensionController(context)
-};
-
-
-
+ 
