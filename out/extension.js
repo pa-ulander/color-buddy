@@ -40,19 +40,17 @@ const vscode = __importStar(require("vscode"));
 const types_1 = require("./types");
 const constants_1 = require("./utils/constants");
 const localization_1 = require("./i18n/localization");
+const services_1 = require("./services");
 process.on('uncaughtException', error => {
     console.error(`${constants_1.LOG_PREFIX} uncaught exception`, error);
 });
 process.on('unhandledRejection', reason => {
     console.error(`${constants_1.LOG_PREFIX} unhandled rejection`, reason);
 });
-const colorDataCache = new Map();
-const pendingColorComputations = new Map();
-const cssVariableRegistry = new Map();
-const cssClassColorRegistry = new Map();
-const cssVariableDecorations = new Map();
-let providerSubscriptions = [];
-let isProbingNativeColors = false;
+// Service instances
+const registry = new services_1.Registry();
+const cache = new services_1.Cache();
+const stateManager = new services_1.StateManager();
 function activate(context) {
     console.log(`${constants_1.LOG_PREFIX} ${(0, localization_1.t)(localization_1.LocalizedStrings.EXTENSION_ACTIVATING)}`);
     // Index CSS files for variable definitions first (before registering providers)
@@ -76,15 +74,7 @@ function activate(context) {
     });
     cssWatcher.onDidDelete(uri => {
         // Remove variables from this file
-        for (const [varName, declarations] of cssVariableRegistry.entries()) {
-            const filtered = declarations.filter(d => d.uri.toString() !== uri.toString());
-            if (filtered.length === 0) {
-                cssVariableRegistry.delete(varName);
-            }
-            else {
-                cssVariableRegistry.set(varName, filtered);
-            }
-        }
+        registry.removeByUri(uri);
         // Refresh after deletion
         refreshVisibleEditors();
     });
@@ -99,7 +89,7 @@ function activate(context) {
     const reindexCommand = vscode.commands.registerCommand('colorbuddy.reindexCSSFiles', async () => {
         await indexWorkspaceCSSFiles();
         refreshVisibleEditors();
-        void vscode.window.showInformationMessage(`ColorBuddy: ${(0, localization_1.t)(localization_1.LocalizedStrings.EXTENSION_INDEXING_COMPLETE, cssVariableRegistry.size)}`);
+        void vscode.window.showInformationMessage(`ColorBuddy: ${(0, localization_1.t)(localization_1.LocalizedStrings.EXTENSION_INDEXING_COMPLETE, registry.variableCount)}`);
     });
     context.subscriptions.push(reindexCommand);
     // Register command to show color palette
@@ -176,27 +166,16 @@ async function ensureColorData(document) {
         clearColorCacheForDocument(document);
         return [];
     }
-    const key = document.uri.toString();
-    const cached = colorDataCache.get(key);
-    if (cached && cached.version === document.version) {
-        return cached.data;
+    const key = `${document.uri.toString()}-${document.version}`;
+    const cached = cache.get(document.uri.toString(), document.version);
+    if (cached) {
+        return cached;
     }
-    const pending = pendingColorComputations.get(key);
-    if (pending) {
-        return pending;
-    }
-    const computation = computeColorData(document)
-        .then(data => {
-        colorDataCache.set(key, { version: document.version, data });
-        pendingColorComputations.delete(key);
+    return cache.getPendingOrCompute(key, async () => {
+        const data = await computeColorData(document);
+        cache.set(document.uri.toString(), document.version, data);
         return data;
-    })
-        .catch(error => {
-        pendingColorComputations.delete(key);
-        throw error;
     });
-    pendingColorComputations.set(key, computation);
-    return computation;
 }
 async function computeColorData(document) {
     const text = document.getText();
@@ -208,10 +187,10 @@ async function computeColorData(document) {
     return allColorData.filter(data => !nativeRanges.has(rangeKey(data.range)));
 }
 async function getNativeColorRangeKeys(document) {
-    if (isProbingNativeColors) {
+    if (stateManager.isProbingNativeColors) {
         return new Set();
     }
-    isProbingNativeColors = true;
+    stateManager.isProbingNativeColors = true;
     try {
         const colorInfos = await vscode.commands.executeCommand('vscode.executeDocumentColorProvider', document.uri);
         if (!Array.isArray(colorInfos) || colorInfos.length === 0) {
@@ -224,21 +203,19 @@ async function getNativeColorRangeKeys(document) {
         return new Set();
     }
     finally {
-        isProbingNativeColors = false;
+        stateManager.isProbingNativeColors = false;
     }
 }
 function rangeKey(range) {
     return `${range.start.line}:${range.start.character}-${range.end.line}:${range.end.character}`;
 }
 function clearColorCacheForDocument(document) {
-    const key = document.uri.toString();
-    colorDataCache.delete(key);
-    pendingColorComputations.delete(key);
+    cache.delete(document.uri.toString());
 }
 function applyCSSVariableDecorations(editor, colorData) {
     // Clear previous decorations for this editor
     const editorKey = editor.document.uri.toString();
-    const existingDecorations = cssVariableDecorations.get(editorKey);
+    const existingDecorations = stateManager.getDecoration(editorKey);
     if (existingDecorations) {
         existingDecorations.dispose();
     }
@@ -254,7 +231,7 @@ function applyCSSVariableDecorations(editor, colorData) {
         }
     }
     if (decorationRanges.length === 0) {
-        cssVariableDecorations.delete(editorKey);
+        stateManager.removeDecoration(editorKey);
         return;
     }
     // Create a single decoration type for all CSS variables
@@ -290,7 +267,7 @@ function applyCSSVariableDecorations(editor, colorData) {
     }
     if (decorationRangesWithOptions.length > 0) {
         editor.setDecorations(decoration, decorationRangesWithOptions);
-        cssVariableDecorations.set(editorKey, decoration);
+        stateManager.setDecoration(editorKey, decoration);
     }
 }
 async function parseCSSFile(document) {
@@ -315,10 +292,7 @@ async function parseCSSFile(document) {
             context: context
         };
         // Add to registry
-        if (!cssVariableRegistry.has(varName)) {
-            cssVariableRegistry.set(varName, []);
-        }
-        cssVariableRegistry.get(varName).push(declaration);
+        registry.addVariable(varName, declaration);
     }
     // Extract CSS class colors
     // Matches patterns like: .className { color: value; }
@@ -333,7 +307,7 @@ async function parseCSSFile(document) {
         const varMatch = value.match(/var\(\s*(--[\w-]+)\s*\)/);
         if (varMatch) {
             const varName = varMatch[1];
-            const varDeclarations = cssVariableRegistry.get(varName);
+            const varDeclarations = registry.getVariable(varName);
             if (varDeclarations && varDeclarations.length > 0) {
                 resolvedValue = resolveNestedVariables(varDeclarations[0].value);
             }
@@ -351,10 +325,7 @@ async function parseCSSFile(document) {
                 line: position.line,
                 selector: selector
             };
-            if (!cssClassColorRegistry.has(className)) {
-                cssClassColorRegistry.set(className, []);
-            }
-            cssClassColorRegistry.get(className).push(declaration);
+            registry.addClass(className, declaration);
         }
     }
 }
@@ -428,8 +399,7 @@ function analyzeContext(selector) {
 }
 async function indexWorkspaceCSSFiles() {
     console.log(`${constants_1.LOG_PREFIX} ${(0, localization_1.t)(localization_1.LocalizedStrings.EXTENSION_INDEXING)}`);
-    cssVariableRegistry.clear();
-    cssClassColorRegistry.clear();
+    registry.clear();
     const cssFiles = await vscode.workspace.findFiles(constants_1.CSS_FILE_PATTERN, constants_1.EXCLUDE_PATTERN, constants_1.MAX_CSS_FILES);
     for (const fileUri of cssFiles) {
         try {
@@ -454,7 +424,7 @@ function resolveNestedVariables(value, visitedVars = new Set()) {
             return value; // Return original value to avoid infinite loop
         }
         // Look up the nested variable
-        const nestedDeclarations = cssVariableRegistry.get(nestedVarName);
+        const nestedDeclarations = registry.getVariable(nestedVarName);
         if (!nestedDeclarations || nestedDeclarations.length === 0) {
             continue; // Can't resolve, keep as-is
         }
@@ -477,7 +447,7 @@ function collectCSSVariableReference(document, startIndex, fullMatch, variableNa
         return;
     }
     // Try to resolve the CSS variable
-    const declarations = cssVariableRegistry.get(variableName);
+    const declarations = registry.getVariable(variableName);
     if (!declarations || declarations.length === 0) {
         return;
     }
@@ -566,7 +536,7 @@ function collectColorData(document, text) {
     while ((classMatch = classNameRegex.exec(text)) !== null) {
         const classList = classMatch[1].split(/\s+/);
         for (const className of classList) {
-            if (className && cssClassColorRegistry.has(className)) {
+            if (className && registry.hasClass(className)) {
                 collectCSSClassColor(document, classMatch.index + classMatch[0].indexOf(className), className, results, seenRanges);
             }
         }
@@ -582,7 +552,7 @@ function collectTailwindClass(document, startIndex, fullMatch, colorName, result
         return;
     }
     // Try to resolve the CSS variable
-    const declarations = cssVariableRegistry.get(variableName);
+    const declarations = registry.getVariable(variableName);
     if (!declarations || declarations.length === 0) {
         // Class doesn't map to a known CSS variable
         return;
@@ -615,7 +585,7 @@ function collectCSSClassColor(document, startIndex, className, results, seenRang
         return;
     }
     // Get the CSS class color declarations
-    const declarations = cssClassColorRegistry.get(className);
+    const declarations = registry.getClass(className);
     if (!declarations || declarations.length === 0) {
         return;
     }
@@ -652,7 +622,7 @@ async function provideColorHover(document, position) {
                 markdown.supportHtml = true;
                 if (data.isCssClass && data.cssClassName) {
                     // Show CSS class color information
-                    const declarations = cssClassColorRegistry.get(data.cssClassName);
+                    const declarations = registry.getClass(data.cssClassName);
                     if (declarations && declarations.length > 0) {
                         const swatchColor = rgbaString(data.vscodeColor, false);
                         const swatchUri = createColorSwatchDataUri(swatchColor);
@@ -679,7 +649,7 @@ async function provideColorHover(document, position) {
                 }
                 else if (data.isCssVariable && data.variableName) {
                     // Show CSS variable or Tailwind class information
-                    const declarations = cssVariableRegistry.get(data.variableName);
+                    const declarations = registry.getVariable(data.variableName);
                     if (!declarations || declarations.length === 0) {
                         // Handle undefined variable
                         markdown.appendMarkdown(`### ${(0, localization_1.t)(localization_1.LocalizedStrings.TOOLTIP_VARIABLE_NOT_FOUND)}\n\n`);
@@ -823,23 +793,19 @@ function clearDecorationsForEditor(editor) {
     clearColorCacheForDocument(editor.document);
     // Clear CSS variable decorations
     const editorKey = editor.document.uri.toString();
-    const decoration = cssVariableDecorations.get(editorKey);
+    const decoration = stateManager.getDecoration(editorKey);
     if (decoration) {
         decoration.dispose();
-        cssVariableDecorations.delete(editorKey);
+        stateManager.removeDecoration(editorKey);
     }
 }
 function clearAllDecorations() {
-    colorDataCache.clear();
-    pendingColorComputations.clear();
+    cache.clear();
     // Dispose all CSS variable decorations
-    for (const decoration of cssVariableDecorations.values()) {
-        decoration.dispose();
-    }
-    cssVariableDecorations.clear();
+    stateManager.clearAllDecorations();
 }
 async function provideDocumentColors(document) {
-    if (isProbingNativeColors) {
+    if (stateManager.isProbingNativeColors) {
         return [];
     }
     try {
@@ -1184,8 +1150,7 @@ function getFormatPriority(original) {
     return Array.from(new Set(order));
 }
 function registerLanguageProviders(context) {
-    providerSubscriptions.forEach(disposable => disposable.dispose());
-    providerSubscriptions = [];
+    stateManager.clearProviderSubscriptions();
     const config = vscode.workspace.getConfiguration('colorbuddy');
     const languages = config.get('languages', types_1.DEFAULT_LANGUAGES);
     if (!languages || languages.length === 0) {
@@ -1214,7 +1179,8 @@ function registerLanguageProviders(context) {
             return provideColorPresentations(color, context);
         }
     });
-    providerSubscriptions.push(hoverProvider, colorProvider);
+    stateManager.addProviderSubscription(hoverProvider);
+    stateManager.addProviderSubscription(colorProvider);
     context.subscriptions.push(hoverProvider, colorProvider);
 }
 function refreshVisibleEditors() {
@@ -1260,7 +1226,11 @@ function getAccessibilityLevel(ratio) {
 function extractWorkspaceColorPalette() {
     const palette = new Map();
     // Extract from CSS variables
-    for (const declarations of cssVariableRegistry.values()) {
+    for (const varName of registry.getAllVariableNames()) {
+        const declarations = registry.getVariable(varName);
+        if (!declarations) {
+            continue;
+        }
         for (const decl of declarations) {
             const resolved = resolveNestedVariables(decl.value);
             const parsed = parseColor(resolved);
@@ -1283,7 +1253,8 @@ exports.__testing = {
     getNativeColorRangeKeys,
     registerLanguageProviders,
     shouldDecorate,
-    colorDataCache,
-    pendingColorComputations
+    registry,
+    cache,
+    stateManager
 };
 //# sourceMappingURL=extension.js.map
