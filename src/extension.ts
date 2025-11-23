@@ -17,7 +17,7 @@ import {
     LOG_PREFIX
 } from './utils/constants';
 import { t, LocalizedStrings } from './i18n/localization';
-import { Registry, Cache, StateManager, ColorParser } from './services';
+import { Registry, Cache, StateManager, ColorParser, ColorFormatter } from './services';
 
 process.on('uncaughtException', error => {
     console.error(`${LOG_PREFIX} uncaught exception`, error);
@@ -32,6 +32,7 @@ const registry = new Registry();
 const cache = new Cache();
 const stateManager = new StateManager();
 const colorParser = new ColorParser();
+const colorFormatter = new ColorFormatter();
 
 export function activate(context: vscode.ExtensionContext) {
     console.log(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_ACTIVATING)}`);
@@ -755,7 +756,7 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                     const declarations = registry.getClass(data.cssClassName);
                     
                     if (declarations && declarations.length > 0) {
-                        const swatchColor = rgbaString(data.vscodeColor, false);
+                        const swatchColor = colorFormatter.toRgba(data.vscodeColor, false);
                         const swatchUri = createColorSwatchDataUri(swatchColor);
                         markdown.appendMarkdown(`### ${t(LocalizedStrings.TOOLTIP_CSS_CLASS)}\n\n`);
                         markdown.appendMarkdown(`![color swatch](${swatchUri}) \`${data.cssClassName}\`\n\n`);
@@ -986,13 +987,13 @@ function provideColorPresentations(color: vscode.Color, context: { document: vsc
     }
 
     const formattedValues = parsed.formatPriority
-        .map((format: ColorFormat) => formatColorByFormat(color, format))
+        .map((format: ColorFormat) => colorFormatter.formatByFormat(color, format))
         .filter((value: string | undefined): value is string => Boolean(value));
 
     const uniqueValues = Array.from(new Set(formattedValues));
 
     if (uniqueValues.length === 0) {
-        uniqueValues.push(rgbaString(color, true));
+        uniqueValues.push(colorFormatter.toRgba(color, true));
     }
 
     return uniqueValues.map(value => {
@@ -1000,93 +1001,6 @@ function provideColorPresentations(color: vscode.Color, context: { document: vsc
         presentation.textEdit = vscode.TextEdit.replace(context.range, value);
         return presentation;
     });
-}
-
-function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
-    r /= 255;
-    g /= 255;
-    b /= 255;
-
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    let h = 0, s = 0;
-    const l = (max + min) / 2;
-
-    if (max !== min) {
-        const d = max - min;
-        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-
-        switch (max) {
-            case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
-            case g: h = ((b - r) / d + 2) / 6; break;
-            case b: h = ((r - g) / d + 4) / 6; break;
-        }
-    }
-
-    return { h: h * 360, s: s * 100, l: l * 100 };
-}
-
-function rgbaString(color: vscode.Color, forceAlpha = false): string {
-    const r = Math.round(color.red * 255);
-    const g = Math.round(color.green * 255);
-    const b = Math.round(color.blue * 255);
-    const a = Number(color.alpha.toFixed(2));
-    if (!forceAlpha && a === 1) {
-        return `rgb(${r}, ${g}, ${b})`;
-    }
-    return `rgba(${r}, ${g}, ${b}, ${a})`;
-}
-
-function hexString(color: vscode.Color, includeAlpha = false): string {
-    const r = Math.round(color.red * 255).toString(16).padStart(2, '0');
-    const g = Math.round(color.green * 255).toString(16).padStart(2, '0');
-    const b = Math.round(color.blue * 255).toString(16).padStart(2, '0');
-    const base = `#${r}${g}${b}`;
-    if (!includeAlpha) {
-        return base;
-    }
-    const alpha = Math.round(color.alpha * 255).toString(16).padStart(2, '0');
-    return `${base}${alpha}`;
-}
-
-function hslString(color: vscode.Color, forceAlpha = false): string {
-    const { h, s, l } = rgbToHsl(color.red * 255, color.green * 255, color.blue * 255);
-    const base = `${round(h)} ${round(s)}% ${round(l)}%`;
-    if (!forceAlpha && color.alpha === 1) {
-        return `hsl(${base})`;
-    }
-    return `hsla(${base} / ${color.alpha.toFixed(2)})`;
-}
-
-function round(value: number): number {
-    return Math.round(value * 100) / 100;
-}
-
-function tailwindString(color: vscode.Color): string {
-    const { h, s, l } = rgbToHsl(color.red * 255, color.green * 255, color.blue * 255);
-    const base = `${round(h)} ${round(s)}% ${round(l)}%`;
-    return color.alpha === 1 ? base : `${base} / ${color.alpha.toFixed(2)}`;
-}
-
-function formatColorByFormat(color: vscode.Color, format: ColorFormat): string | undefined {
-    switch (format) {
-        case 'hex':
-            return color.alpha === 1 ? hexString(color, false) : undefined;
-        case 'hexAlpha':
-            return hexString(color, true);
-        case 'rgb':
-            return color.alpha === 1 ? rgbaString(color, false) : undefined;
-        case 'rgba':
-            return rgbaString(color, true);
-        case 'hsl':
-            return color.alpha === 1 ? hslString(color, false) : undefined;
-        case 'hsla':
-            return hslString(color, true);
-        case 'tailwind':
-            return tailwindString(color);
-        default:
-            return undefined;
-    }
 }
 
 function registerLanguageProviders(context: vscode.ExtensionContext) {
@@ -1196,7 +1110,7 @@ function extractWorkspaceColorPalette(): Map<string, vscode.Color> {
 // Export selected internals for targeted unit tests.
 export const __testing = {
     colorParser,
-    formatColorByFormat,
+    colorFormatter,
     collectColorData,
     provideDocumentColors,
     computeColorData,
