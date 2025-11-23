@@ -4,6 +4,22 @@ All notable changes to the **ColorBuddy** extension will be documented in this f
 
 ## [Unreleased]
 
+### Changed
+- **Major Refactoring**: Reorganized codebase into modular service-based architecture
+  - Reduced `extension.ts` from 1591 lines to 423 lines (73% reduction)
+  - Created 9 specialized services in `src/services/`:
+    - **Registry** (149 lines) - CSS variable and class color storage
+    - **Cache** (100 lines) - Document-level caching with deduplication
+    - **StateManager** (123 lines) - Extension state and decoration lifecycle
+    - **ColorParser** (338 lines) - Parse 7 color formats into normalized objects
+    - **ColorFormatter** (135 lines) - Format colors to various string representations
+    - **ColorDetector** (311 lines) - Detect colors in documents using regex patterns
+    - **CSSParser** (225 lines) - Parse CSS files and resolve nested variables
+    - **Provider** (317 lines) - VS Code hover and color provider implementations
+  - Improved code maintainability, testability, and modularity
+  - All 186 tests passing with 100% success rate
+  - Clean separation of concerns with dependency injection pattern
+
 ### Added
 - CSS class color detection and preview support
   - Detects CSS classes with color properties (`color`, `background-color`, `border-color`, `background`)
