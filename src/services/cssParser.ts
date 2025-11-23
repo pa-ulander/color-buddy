@@ -19,9 +19,6 @@ export class CSSParser {
     async parseCSSFile(document: vscode.TextDocument): Promise<void> {
         const text = document.getText();
 
-        // Remove existing declarations for this document so we can re-build a fresh snapshot.
-        this.registry.removeByUri(document.uri);
-
         const { declarations: variableDeclarations, lookup: localVariables } = this.extractCSSVariables(document, text);
 
         this.registry.replaceVariablesForUri(document.uri, variableDeclarations);
@@ -223,37 +220,39 @@ export class CSSParser {
         } = {}
     ): string {
         const varPattern = /var\(\s*(--[\w-]+)\s*\)/g;
-        let match: RegExpExecArray | null;
         let resolvedValue = value;
         const visitedVars = options.visited ?? new Set<string>();
         const localVariables = options.localVariables;
 
-        while ((match = varPattern.exec(value)) !== null) {
-            const nestedVarName = match[1];
-            
-            // Circular reference detection
-            if (visitedVars.has(nestedVarName)) {
-                console.warn(`[cb] Circular CSS variable reference detected: ${nestedVarName}`);
-                return value; // Return original value to avoid infinite loop
+        let replaced = false;
+        do {
+            replaced = false;
+            varPattern.lastIndex = 0;
+            let match: RegExpExecArray | null;
+            while ((match = varPattern.exec(resolvedValue)) !== null) {
+                const nestedVarName = match[1];
+
+                if (visitedVars.has(nestedVarName)) {
+                    console.warn(`[cb] Circular CSS variable reference detected: ${nestedVarName}`);
+                    return value;
+                }
+
+                const nestedDeclaration = this.getPreferredDeclaration(nestedVarName, localVariables);
+                if (!nestedDeclaration) {
+                    continue;
+                }
+
+                const newVisited = new Set(visitedVars);
+                newVisited.add(nestedVarName);
+                const nestedResolved = this.resolveNestedVariables(nestedDeclaration.value, {
+                    localVariables,
+                    visited: newVisited
+                });
+
+                resolvedValue = resolvedValue.replace(match[0], nestedResolved);
+                replaced = true;
             }
-            
-            // Look up the nested variable
-            const nestedDeclaration = this.getPreferredDeclaration(nestedVarName, localVariables);
-            if (!nestedDeclaration) {
-                continue; // Keep the var() reference if not found
-            }
-            
-            // Mark as visited and recurse
-            const newVisited = new Set(visitedVars);
-            newVisited.add(nestedVarName);
-            const nestedResolved = this.resolveNestedVariables(nestedDeclaration.value, {
-                localVariables,
-                visited: newVisited
-            });
-            
-            // Replace this var() with the resolved value
-            resolvedValue = resolvedValue.replace(match[0], nestedResolved);
-        }
+        } while (replaced);
         
         return resolvedValue;
     }
