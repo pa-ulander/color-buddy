@@ -1,7 +1,5 @@
 import * as vscode from 'vscode';
-import type {
-    ColorData
-} from './types';
+import type { ColorData } from './types';
 import { DEFAULT_LANGUAGES } from './types';
 import {
     MAX_CSS_FILES,
@@ -13,75 +11,152 @@ import {
     LOG_PREFIX
 } from './utils/constants';
 import { t, LocalizedStrings } from './i18n/localization';
-import { Registry, Cache, StateManager, ColorParser, ColorFormatter, ColorDetector, CSSParser, Provider } from './services';
+import {
+    Registry,
+    Cache,
+    StateManager,
+    ColorParser,
+    ColorFormatter,
+    ColorDetector,
+    CSSParser,
+    Provider
+} from './services';
 
-process.on('uncaughtException', error => {
-    console.error(`${LOG_PREFIX} uncaught exception`, error);
-});
+/**
+ * Main extension controller managing lifecycle and coordination between services.
+ * Follows the dependency injection pattern for better testability and maintainability.
+ */
+class ExtensionController implements vscode.Disposable {
+    private readonly registry: Registry;
+    private readonly cache: Cache;
+    private readonly stateManager: StateManager;
+    private readonly colorParser: ColorParser;
+    private readonly colorFormatter: ColorFormatter;
+    private readonly colorDetector: ColorDetector;
+    private readonly cssParser: CSSParser;
+    private readonly provider: Provider;
+    private readonly disposables: vscode.Disposable[] = [];
+    private cssFileWatcher: vscode.FileSystemWatcher | null = null;
 
-process.on('unhandledRejection', reason => {
-    console.error(`${LOG_PREFIX} unhandled rejection`, reason);
-});
+    constructor(private readonly context: vscode.ExtensionContext) {
+        // Initialize services with dependency injection
+        this.registry = new Registry();
+        this.cache = new Cache();
+        this.stateManager = new StateManager();
+        this.colorParser = new ColorParser();
+        this.colorFormatter = new ColorFormatter();
+        this.colorDetector = new ColorDetector(this.registry, this.colorParser);
+        this.cssParser = new CSSParser(this.registry, this.colorParser);
+        this.provider = new Provider(this.registry, this.colorParser, this.colorFormatter, this.cssParser);
+    }
 
-// Service instances
-const registry = new Registry();
-const cache = new Cache();
-const stateManager = new StateManager();
-const colorParser = new ColorParser();
-const colorFormatter = new ColorFormatter();
-const colorDetector = new ColorDetector(registry, colorParser);
-const cssParser = new CSSParser(registry, colorParser);
-const provider = new Provider(registry, colorParser, colorFormatter, cssParser);
+    /**
+     * Activate the extension and set up all features.
+     */
+    async activate(): Promise<void> {
+        console.log(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_ACTIVATING)}`);
 
-export function activate(context: vscode.ExtensionContext) {
-    console.log(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_ACTIVATING)}`);
+        this.setupErrorHandlers();
+        await this.indexWorkspaceCSSFiles();
+        this.setupCSSFileWatcher();
+        this.registerCommands();
+        this.registerEventHandlers();
+        this.registerLanguageProviders();
+        this.refreshVisibleEditors();
 
-    // Index CSS files for variable definitions first (before registering providers)
-    const indexingPromise = indexWorkspaceCSSFiles();
-
-    // Watch for CSS file changes
-    const cssWatcher = vscode.workspace.createFileSystemWatcher(CSS_FILE_PATTERN);
-    cssWatcher.onDidChange(uri => {
-        vscode.workspace.openTextDocument(uri).then(doc => {
-            void cssParser.parseCSSFile(doc).then(() => {
-                // Refresh all visible editors after CSS changes
-                refreshVisibleEditors();
-            });
-        });
-    });
-    cssWatcher.onDidCreate(uri => {
-        vscode.workspace.openTextDocument(uri).then(doc => {
-            void cssParser.parseCSSFile(doc).then(() => {
-                refreshVisibleEditors();
-            });
-        });
-    });
-    cssWatcher.onDidDelete(uri => {
-        // Remove variables from this file
-        registry.removeByUri(uri);
-        // Refresh after deletion
-        refreshVisibleEditors();
-    });
-    context.subscriptions.push(cssWatcher);
-
-    // Wait for indexing to complete, then register providers and refresh
-    void indexingPromise.then(() => {
         console.log(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_ACTIVATED)}`);
-        registerLanguageProviders(context);
-        refreshVisibleEditors();
-    });
+    }
 
-    // Register command to re-index CSS files (useful for debugging)
-    const reindexCommand = vscode.commands.registerCommand('colorbuddy.reindexCSSFiles', async () => {
-        await indexWorkspaceCSSFiles();
-        refreshVisibleEditors();
-        void vscode.window.showInformationMessage(`ColorBuddy: ${t(LocalizedStrings.EXTENSION_INDEXING_COMPLETE, registry.variableCount)}`);
-    });
-    context.subscriptions.push(reindexCommand);
+    /**
+     * Set up global error handlers for uncaught exceptions and unhandled rejections.
+     */
+    private setupErrorHandlers(): void {
+        const uncaughtHandler = (error: Error) => {
+            console.error(`${LOG_PREFIX} uncaught exception`, error);
+        };
+        const unhandledHandler = (reason: unknown) => {
+            console.error(`${LOG_PREFIX} unhandled rejection`, reason);
+        };
 
-    // Register command to show color palette
-    const showPaletteCommand = vscode.commands.registerCommand('colorbuddy.showColorPalette', () => {
-        const palette = extractWorkspaceColorPalette();
+        process.on('uncaughtException', uncaughtHandler);
+        process.on('unhandledRejection', unhandledHandler);
+
+        // Clean up handlers on deactivation
+        this.disposables.push({
+            dispose: () => {
+                process.removeListener('uncaughtException', uncaughtHandler);
+                process.removeListener('unhandledRejection', unhandledHandler);
+            }
+        });
+    }
+
+    /**
+     * Set up file system watcher for CSS files.
+     */
+    private setupCSSFileWatcher(): void {
+        this.cssFileWatcher = vscode.workspace.createFileSystemWatcher(CSS_FILE_PATTERN);
+
+        this.cssFileWatcher.onDidChange(uri => this.handleCSSFileChange(uri));
+        this.cssFileWatcher.onDidCreate(uri => this.handleCSSFileChange(uri));
+        this.cssFileWatcher.onDidDelete(uri => this.handleCSSFileDelete(uri));
+
+        this.context.subscriptions.push(this.cssFileWatcher);
+    }
+
+    /**
+     * Handle CSS file changes by re-parsing and refreshing editors.
+     */
+    private async handleCSSFileChange(uri: vscode.Uri): Promise<void> {
+        try {
+            const document = await vscode.workspace.openTextDocument(uri);
+            await this.cssParser.parseCSSFile(document);
+            this.refreshVisibleEditors();
+        } catch (error) {
+            console.error(`${LOG_PREFIX} failed to handle CSS file change for ${uri.fsPath}`, error);
+        }
+    }
+
+    /**
+     * Handle CSS file deletion by removing variables and refreshing editors.
+     */
+    private handleCSSFileDelete(uri: vscode.Uri): void {
+        this.registry.removeByUri(uri);
+        this.refreshVisibleEditors();
+    }
+
+    /**
+     * Register all extension commands.
+     */
+    private registerCommands(): void {
+        const commands = [
+            vscode.commands.registerCommand('colorbuddy.reindexCSSFiles', () => this.handleReindexCommand()),
+            vscode.commands.registerCommand('colorbuddy.showColorPalette', () => this.handleShowPaletteCommand())
+        ];
+
+        this.context.subscriptions.push(...commands);
+    }
+
+    /**
+     * Handle re-index CSS files command.
+     */
+    private async handleReindexCommand(): Promise<void> {
+        try {
+            await this.indexWorkspaceCSSFiles();
+            this.refreshVisibleEditors();
+            await vscode.window.showInformationMessage(
+                `ColorBuddy: ${t(LocalizedStrings.EXTENSION_INDEXING_COMPLETE, this.registry.variableCount)}`
+            );
+        } catch (error) {
+            console.error(`${LOG_PREFIX} failed to re-index CSS files`, error);
+            await vscode.window.showErrorMessage('ColorBuddy: Failed to re-index CSS files');
+        }
+    }
+
+    /**
+     * Handle show color palette command.
+     */
+    private async handleShowPaletteCommand(): Promise<void> {
+        const palette = this.extractWorkspaceColorPalette();
         const items = Array.from(palette.entries()).map(([colorString, color]) => {
             const r = Math.round(color.red * 255);
             const g = Math.round(color.green * 255);
@@ -89,188 +164,269 @@ export function activate(context: vscode.ExtensionContext) {
             return {
                 label: colorString,
                 description: `RGB(${r}, ${g}, ${b})`,
-                detail: `Used in workspace CSS variables`
+                detail: 'Used in workspace CSS variables'
             };
         });
-        
+
         if (items.length === 0) {
-            void vscode.window.showInformationMessage(t(LocalizedStrings.PALETTE_NO_COLORS));
+            await vscode.window.showInformationMessage(t(LocalizedStrings.PALETTE_NO_COLORS));
         } else {
-            void vscode.window.showQuickPick(items, {
-                title: t(LocalizedStrings.PALETTE_TITLE) + ` (${items.length})`,
+            await vscode.window.showQuickPick(items, {
+                title: `${t(LocalizedStrings.PALETTE_TITLE)} (${items.length})`,
                 placeHolder: t(LocalizedStrings.PALETTE_TITLE)
             });
         }
-    });
-    context.subscriptions.push(showPaletteCommand);
-
-    context.subscriptions.push(
-        vscode.window.onDidChangeActiveTextEditor(editor => {
-            if (editor) {
-                void refreshEditor(editor);
-            }
-        }),
-        vscode.workspace.onDidChangeTextDocument(event => {
-            const targetEditor = vscode.window.visibleTextEditors.find(editor => editor.document === event.document);
-            if (targetEditor) {
-                void refreshEditor(targetEditor);
-            }
-        }),
-        vscode.workspace.onDidCloseTextDocument(document => {
-            clearColorCacheForDocument(document);
-        }),
-        vscode.workspace.onDidChangeConfiguration(event => {
-            if (event.affectsConfiguration('colorbuddy.languages')) {
-                registerLanguageProviders(context);
-                refreshVisibleEditors();
-            }
-        })
-    );
-}
-
-export function deactivate() {
-    clearAllDecorations();
-}
-
-async function refreshEditor(editor: vscode.TextEditor): Promise<void> {
-    if (!shouldDecorate(editor.document)) {
-        clearDecorationsForEditor(editor);
-        return;
     }
 
-    try {
-        const colorData = await ensureColorData(editor.document);
-        applyCSSVariableDecorations(editor, colorData);
-    } catch (error) {
-        console.error(`${LOG_PREFIX} failed to refresh color data`, error);
-    }
-}
-
-function shouldDecorate(document: vscode.TextDocument): boolean {
-    const config = vscode.workspace.getConfiguration('colorbuddy');
-    const languages = config.get<string[]>('languages', DEFAULT_LANGUAGES);
-    if (!languages || languages.length === 0) {
-        return false;
-    }
-
-    if (languages.includes('*')) {
-        return true;
-    }
-
-    return languages.includes(document.languageId);
-}
-
-async function ensureColorData(document: vscode.TextDocument): Promise<ColorData[]> {
-    if (!shouldDecorate(document)) {
-        clearColorCacheForDocument(document);
-        return [];
-    }
-
-    const key = `${document.uri.toString()}-${document.version}`;
-    const cached = cache.get(document.uri.toString(), document.version);
-    if (cached) {
-        return cached;
-    }
-
-    return cache.getPendingOrCompute(key, async () => {
-        const data = await computeColorData(document);
-        cache.set(document.uri.toString(), document.version, data);
-        return data;
-    });
-}
-
-async function computeColorData(document: vscode.TextDocument): Promise<ColorData[]> {
-    const text = document.getText();
-    const allColorData = colorDetector.collectColorData(document, text);
-    const nativeRanges = await getNativeColorRangeKeys(document);
-
-    if (nativeRanges.size === 0) {
-        return allColorData;
-    }
-
-    return allColorData.filter(data => !nativeRanges.has(rangeKey(data.range)));
-}
-
-async function getNativeColorRangeKeys(document: vscode.TextDocument): Promise<Set<string>> {
-    if (stateManager.isProbingNativeColors) {
-        return new Set();
-    }
-
-    stateManager.isProbingNativeColors = true;
-    try {
-        const colorInfos = await vscode.commands.executeCommand<vscode.ColorInformation[] | undefined>(
-            'vscode.executeDocumentColorProvider',
-            document.uri
+    /**
+     * Register document and editor event handlers.
+     */
+    private registerEventHandlers(): void {
+        this.context.subscriptions.push(
+            vscode.window.onDidChangeActiveTextEditor(editor => {
+                if (editor) {
+                    this.refreshEditor(editor).catch(error => {
+                        console.error(`${LOG_PREFIX} failed to refresh active editor`, error);
+                    });
+                }
+            }),
+            vscode.workspace.onDidChangeTextDocument(event => {
+                const targetEditor = vscode.window.visibleTextEditors.find(
+                    editor => editor.document === event.document
+                );
+                if (targetEditor) {
+                    this.refreshEditor(targetEditor).catch(error => {
+                        console.error(`${LOG_PREFIX} failed to refresh document editor`, error);
+                    });
+                }
+            }),
+            vscode.workspace.onDidCloseTextDocument(document => {
+                this.clearColorCacheForDocument(document);
+            }),
+            vscode.workspace.onDidChangeConfiguration(event => {
+                if (event.affectsConfiguration('colorbuddy.languages')) {
+                    this.registerLanguageProviders();
+                    this.refreshVisibleEditors();
+                }
+            })
         );
+    }
 
-        if (!Array.isArray(colorInfos) || colorInfos.length === 0) {
+    /**
+     * Register language feature providers (hover, color picker).
+     */
+    private registerLanguageProviders(): void {
+        this.stateManager.clearProviderSubscriptions();
+
+        const config = vscode.workspace.getConfiguration('colorbuddy');
+        const languages = config.get<string[]>('languages', DEFAULT_LANGUAGES);
+
+        if (!languages || languages.length === 0) {
+            return;
+        }
+
+        const selector = this.createDocumentSelector(languages);
+
+        const hoverProvider = vscode.languages.registerHoverProvider(selector, {
+            provideHover: async (document, position) => {
+                const colorData = await this.ensureColorData(document);
+                return this.provider.provideHover(colorData, position);
+            }
+        });
+
+        const colorProvider = vscode.languages.registerColorProvider(selector, {
+            provideDocumentColors: async (document) => {
+                if (this.stateManager.isProbingNativeColors) {
+                    return [];
+                }
+                const colorData = await this.ensureColorData(document);
+                return this.provider.provideDocumentColors(colorData);
+            },
+            provideColorPresentations: (color, context) => {
+                const originalText = context.document.getText(context.range);
+                const presentations = this.provider.provideColorPresentations(color, originalText);
+                return presentations.map(presentation => {
+                    presentation.textEdit = vscode.TextEdit.replace(context.range, presentation.label);
+                    return presentation;
+                });
+            }
+        });
+
+        this.stateManager.addProviderSubscription(hoverProvider);
+        this.stateManager.addProviderSubscription(colorProvider);
+        this.context.subscriptions.push(hoverProvider, colorProvider);
+    }
+
+    /**
+     * Create a document selector based on language configuration.
+     */
+    private createDocumentSelector(languages: string[]): vscode.DocumentSelector {
+        if (languages.includes('*')) {
+            return [
+                { scheme: 'file' },
+                { scheme: 'untitled' }
+            ];
+        }
+        return languages.map(language => ({ language }));
+    }
+
+    /**
+     * Refresh a single editor's color decorations.
+     */
+    private async refreshEditor(editor: vscode.TextEditor): Promise<void> {
+        if (!this.shouldDecorate(editor.document)) {
+            this.clearDecorationsForEditor(editor);
+            return;
+        }
+
+        try {
+            const colorData = await this.ensureColorData(editor.document);
+            this.applyCSSVariableDecorations(editor, colorData);
+        } catch (error) {
+            console.error(`${LOG_PREFIX} failed to refresh color data`, error);
+        }
+    }
+
+    /**
+     * Refresh all visible editors.
+     */
+    private refreshVisibleEditors(): void {
+        vscode.window.visibleTextEditors.forEach(editor => {
+            this.refreshEditor(editor).catch(error => {
+                console.error(`${LOG_PREFIX} failed to refresh editor`, error);
+            });
+        });
+    }
+
+    /**
+     * Determine if a document should have color decorations.
+     */
+    private shouldDecorate(document: vscode.TextDocument): boolean {
+        const config = vscode.workspace.getConfiguration('colorbuddy');
+        const languages = config.get<string[]>('languages', DEFAULT_LANGUAGES);
+        
+        if (!languages || languages.length === 0) {
+            return false;
+        }
+
+        return languages.includes('*') || languages.includes(document.languageId);
+    }
+
+    /**
+     * Ensure color data is available for a document, using cache when possible.
+     */
+    private async ensureColorData(document: vscode.TextDocument): Promise<ColorData[]> {
+        if (!this.shouldDecorate(document)) {
+            this.clearColorCacheForDocument(document);
+            return [];
+        }
+
+        const cached = this.cache.get(document.uri.toString(), document.version);
+        if (cached) {
+            return cached;
+        }
+
+        const key = `${document.uri.toString()}-${document.version}`;
+        return this.cache.getPendingOrCompute(key, async () => {
+            const data = await this.computeColorData(document);
+            this.cache.set(document.uri.toString(), document.version, data);
+            return data;
+        });
+    }
+
+    /**
+     * Compute color data for a document.
+     */
+    private async computeColorData(document: vscode.TextDocument): Promise<ColorData[]> {
+        const text = document.getText();
+        const allColorData = this.colorDetector.collectColorData(document, text);
+        const nativeRanges = await this.getNativeColorRangeKeys(document);
+
+        if (nativeRanges.size === 0) {
+            return allColorData;
+        }
+
+        return allColorData.filter(data => !nativeRanges.has(this.rangeKey(data.range)));
+    }
+
+    /**
+     * Get native color provider ranges to avoid duplicates.
+     */
+    private async getNativeColorRangeKeys(document: vscode.TextDocument): Promise<Set<string>> {
+        if (this.stateManager.isProbingNativeColors) {
             return new Set();
         }
 
-        return new Set(colorInfos.map(info => rangeKey(info.range)));
-    } catch (error) {
-        console.warn('[cb] native color provider probe failed', error);
-        return new Set();
-    } finally {
-        stateManager.isProbingNativeColors = false;
-    }
-}
+        this.stateManager.isProbingNativeColors = true;
+        try {
+            const colorInfos = await vscode.commands.executeCommand<vscode.ColorInformation[] | undefined>(
+                'vscode.executeDocumentColorProvider',
+                document.uri
+            );
 
-function rangeKey(range: vscode.Range): string {
-    return `${range.start.line}:${range.start.character}-${range.end.line}:${range.end.character}`;
-}
+            if (!Array.isArray(colorInfos) || colorInfos.length === 0) {
+                return new Set();
+            }
 
-function clearColorCacheForDocument(document: vscode.TextDocument) {
-    cache.delete(document.uri.toString());
-}
-
-function applyCSSVariableDecorations(editor: vscode.TextEditor, colorData: ColorData[]): void {
-    // Clear previous decorations for this editor
-    const editorKey = editor.document.uri.toString();
-    const existingDecorations = stateManager.getDecoration(editorKey);
-    if (existingDecorations) {
-        existingDecorations.dispose();
-    }
-
-    // Collect all CSS variable and CSS class color ranges
-    const decorationRanges: vscode.Range[] = [];
-    const colorsByRange = new Map<string, string>();
-    
-    for (const data of colorData) {
-        // Include CSS variables (not wrapped in functions) and CSS class colors
-        if ((data.isCssVariable && !data.isWrappedInFunction) || data.isCssClass) {
-            decorationRanges.push(data.range);
-            const rangeKey = `${data.range.start.line}:${data.range.start.character}`;
-            colorsByRange.set(rangeKey, data.normalizedColor);
+            return new Set(colorInfos.map(info => this.rangeKey(info.range)));
+        } catch (error) {
+            console.warn(`${LOG_PREFIX} native color provider probe failed`, error);
+            return new Set();
+        } finally {
+            this.stateManager.isProbingNativeColors = false;
         }
     }
 
-    if (decorationRanges.length === 0) {
-        stateManager.removeDecoration(editorKey);
-        return;
+    /**
+     * Create a unique key for a range.
+     */
+    private rangeKey(range: vscode.Range): string {
+        return `${range.start.line}:${range.start.character}-${range.end.line}:${range.end.character}`;
     }
 
-    // Create a single decoration type for all CSS variables
-    const decoration = vscode.window.createTextEditorDecorationType({
-        before: {
-            contentText: '',
-            border: COLOR_SWATCH_BORDER,
-            width: `${COLOR_SWATCH_SIZE}px`,
-            height: `${COLOR_SWATCH_SIZE}px`,
-            margin: COLOR_SWATCH_MARGIN
-        },
-        backgroundColor: 'transparent'
-    });
+    /**
+     * Apply CSS variable decorations to an editor.
+     */
+    private applyCSSVariableDecorations(editor: vscode.TextEditor, colorData: ColorData[]): void {
+        const editorKey = this.getEditorKey(editor);
+        const existingDecoration = this.stateManager.getDecoration(editorKey);
+        if (existingDecoration) {
+            existingDecoration.dispose();
+        }
 
-    // Apply decorations with individual colors
-    const decorationRangesWithOptions: { range: vscode.Range; renderOptions?: vscode.DecorationRenderOptions }[] = [];
-    for (const range of decorationRanges) {
-        const rangeKey = `${range.start.line}:${range.start.character}`;
-        const color = colorsByRange.get(rangeKey);
-        if (color) {
-            decorationRangesWithOptions.push({
+        const decorationRanges: vscode.Range[] = [];
+        const colorsByRange = new Map<string, string>();
+
+        for (const data of colorData) {
+            if ((data.isCssVariable && !data.isWrappedInFunction) || data.isCssClass) {
+                decorationRanges.push(data.range);
+                const rangeKey = `${data.range.start.line}:${data.range.start.character}`;
+                colorsByRange.set(rangeKey, data.normalizedColor);
+            }
+        }
+
+        if (decorationRanges.length === 0) {
+            this.stateManager.removeDecoration(editorKey);
+            return;
+        }
+
+        const decoration = vscode.window.createTextEditorDecorationType({
+            before: {
+                contentText: '',
+                border: COLOR_SWATCH_BORDER,
+                width: `${COLOR_SWATCH_SIZE}px`,
+                height: `${COLOR_SWATCH_SIZE}px`,
+                margin: COLOR_SWATCH_MARGIN
+            },
+            backgroundColor: 'transparent'
+        });
+
+        const decorationRangesWithOptions = decorationRanges.map(range => {
+            const rangeKey = `${range.start.line}:${range.start.character}`;
+            const color = colorsByRange.get(rangeKey);
+            return {
                 range,
-                renderOptions: {
+                renderOptions: color ? {
                     before: {
                         backgroundColor: color,
                         border: COLOR_SWATCH_BORDER,
@@ -278,145 +434,125 @@ function applyCSSVariableDecorations(editor: vscode.TextEditor, colorData: Color
                         height: `${COLOR_SWATCH_SIZE}px`,
                         margin: COLOR_SWATCH_MARGIN
                     }
+                } : undefined
+            };
+        }).filter(item => item.renderOptions);
+
+        if (decorationRangesWithOptions.length > 0) {
+            editor.setDecorations(decoration, decorationRangesWithOptions);
+            this.stateManager.setDecoration(editorKey, decoration);
+        }
+    }
+
+    /**
+     * Index all CSS files in the workspace.
+     */
+    private async indexWorkspaceCSSFiles(): Promise<void> {
+        console.log(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_INDEXING)}`);
+        this.registry.clear();
+
+        const cssFiles = await vscode.workspace.findFiles(
+            CSS_FILE_PATTERN,
+            EXCLUDE_PATTERN,
+            MAX_CSS_FILES
+        );
+
+        for (const fileUri of cssFiles) {
+            try {
+                const document = await vscode.workspace.openTextDocument(fileUri);
+                await this.cssParser.parseCSSFile(document);
+            } catch (error) {
+                console.error(
+                    `${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_ERROR_CSS_INDEXING, fileUri.fsPath, String(error))}`
+                );
+            }
+        }
+    }
+
+    /**
+     * Clear color cache for a document.
+     */
+    private clearColorCacheForDocument(document: vscode.TextDocument): void {
+        this.cache.delete(document.uri.toString());
+    }
+
+    /**
+     * Clear decorations for a specific editor.
+     */
+    private clearDecorationsForEditor(editor: vscode.TextEditor): void {
+        this.clearColorCacheForDocument(editor.document);
+        const editorKey = this.getEditorKey(editor);
+        this.stateManager.removeDecoration(editorKey);
+    }
+
+    /**
+     * Extract unique colors from workspace CSS variables.
+     */
+    private extractWorkspaceColorPalette(): Map<string, vscode.Color> {
+        const palette = new Map<string, vscode.Color>();
+
+        for (const varName of this.registry.getAllVariableNames()) {
+            const declarations = this.registry.getVariable(varName);
+            if (!declarations) {
+                continue;
+            }
+
+            for (const decl of declarations) {
+                const resolved = this.cssParser.resolveNestedVariables(decl.value);
+                const parsed = this.colorParser.parseColor(resolved);
+                if (parsed) {
+                    palette.set(parsed.cssString, parsed.vscodeColor);
                 }
-            });
-        }
-    }
-
-    if (decorationRangesWithOptions.length > 0) {
-        editor.setDecorations(decoration, decorationRangesWithOptions);
-        stateManager.setDecoration(editorKey, decoration);
-    }
-}
-
-async function indexWorkspaceCSSFiles(): Promise<void> {
-    console.log(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_INDEXING)}`);
-    registry.clear();
-
-    const cssFiles = await vscode.workspace.findFiles(CSS_FILE_PATTERN, EXCLUDE_PATTERN, MAX_CSS_FILES);
-    
-    for (const fileUri of cssFiles) {
-        try {
-            const document = await vscode.workspace.openTextDocument(fileUri);
-            await cssParser.parseCSSFile(document);
-        } catch (error) {
-            console.error(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_ERROR_CSS_INDEXING, fileUri.fsPath, String(error))}`);
-        }
-    }
-}
-
-function clearDecorationsForEditor(editor: vscode.TextEditor) {
-    clearColorCacheForDocument(editor.document);
-    
-    // Clear CSS variable decorations
-    const editorKey = editor.document.uri.toString();
-    const decoration = stateManager.getDecoration(editorKey);
-    if (decoration) {
-        decoration.dispose();
-        stateManager.removeDecoration(editorKey);
-    }
-}
-
-function clearAllDecorations() {
-    cache.clear();
-    
-    // Dispose all CSS variable decorations
-    stateManager.clearAllDecorations();
-}
-
-function registerLanguageProviders(context: vscode.ExtensionContext) {
-    stateManager.clearProviderSubscriptions();
-
-    const config = vscode.workspace.getConfiguration('colorbuddy');
-    const languages = config.get<string[]>('languages', DEFAULT_LANGUAGES);
-
-    if (!languages || languages.length === 0) {
-        return;
-    }
-
-    let selector: vscode.DocumentSelector;
-    if (languages.includes('*')) {
-        selector = [
-            { scheme: 'file' },
-            { scheme: 'untitled' }
-        ];
-    } else {
-        selector = languages.map(language => ({ language }));
-    }
-
-    const hoverProvider = vscode.languages.registerHoverProvider(selector, {
-        async provideHover(document, position) {
-            const colorData = await ensureColorData(document);
-            return provider.provideHover(colorData, position);
-        }
-    });
-
-    const colorProvider = vscode.languages.registerColorProvider(selector, {
-        async provideDocumentColors(document) {
-            if (stateManager.isProbingNativeColors) {
-                return [];
-            }
-            const colorData = await ensureColorData(document);
-            return provider.provideDocumentColors(colorData);
-        },
-        provideColorPresentations(color, context) {
-            const originalText = context.document.getText(context.range);
-            const presentations = provider.provideColorPresentations(color, originalText);
-            // Add text edit to each presentation
-            return presentations.map(presentation => {
-                presentation.textEdit = vscode.TextEdit.replace(context.range, presentation.label);
-                return presentation;
-            });
-        }
-    });
-
-    stateManager.addProviderSubscription(hoverProvider);
-    stateManager.addProviderSubscription(colorProvider);
-    context.subscriptions.push(hoverProvider, colorProvider);
-}
-
-function refreshVisibleEditors() {
-    vscode.window.visibleTextEditors.forEach(editor => {
-        void refreshEditor(editor);
-    });
-}
-
-// Extract unique colors from workspace
-function extractWorkspaceColorPalette(): Map<string, vscode.Color> {
-    const palette = new Map<string, vscode.Color>();
-    
-    // Extract from CSS variables
-    for (const varName of registry.getAllVariableNames()) {
-        const declarations = registry.getVariable(varName);
-        if (!declarations) { continue; }
-        
-        for (const decl of declarations) {
-            const resolved = cssParser.resolveNestedVariables(decl.value);
-            const parsed = colorParser.parseColor(resolved);
-            if (parsed) {
-                palette.set(parsed.cssString, parsed.vscodeColor);
             }
         }
+
+        return palette;
     }
-    
-    return palette;
+
+    /**
+     * Get a unique key for an editor.
+     */
+    private getEditorKey(editor: vscode.TextEditor): string {
+        return editor.document.uri.toString();
+    }
+
+    /**
+     * Dispose all resources.
+     */
+    dispose(): void {
+        this.stateManager.dispose();
+        this.cache.clear();
+        this.cssFileWatcher?.dispose();
+        this.disposables.forEach(d => d.dispose());
+    }
 }
 
-// Export selected internals for targeted unit tests.
+// Extension state
+let controller: ExtensionController | null = null;
+
+/**
+ * Extension activation entry point.
+ */
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+    controller = new ExtensionController(context);
+    await controller.activate();
+}
+
+/**
+ * Extension deactivation entry point.
+ */
+export function deactivate(): void {
+    controller?.dispose();
+    controller = null;
+}
+
+/**
+ * Export selected internals for targeted unit tests.
+ * These should only be used in test files.
+ */
 export const __testing = {
-    colorParser,
-    colorFormatter,
-    colorDetector,
-    cssParser,
-    provider,
-    computeColorData,
-    ensureColorData,
-    getNativeColorRangeKeys,
-    registerLanguageProviders,
-    shouldDecorate,
-    registry,
-    cache,
-    stateManager
+    ExtensionController,
+    createController: (context: vscode.ExtensionContext) => new ExtensionController(context)
 };
 
 
