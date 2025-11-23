@@ -18,6 +18,7 @@ import {
     COLOR_SWATCH_BORDER,
     LOG_PREFIX
 } from './utils/constants';
+import { t, LocalizedStrings } from './i18n/localization';
 
 process.on('uncaughtException', error => {
     console.error(`${LOG_PREFIX} uncaught exception`, error);
@@ -36,7 +37,7 @@ let providerSubscriptions: vscode.Disposable[] = [];
 let isProbingNativeColors = false;
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log(`${LOG_PREFIX} activating...`);
+    console.log(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_ACTIVATING)}`);
 
     // Index CSS files for variable definitions first (before registering providers)
     const indexingPromise = indexWorkspaceCSSFiles();
@@ -75,7 +76,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Wait for indexing to complete, then register providers and refresh
     void indexingPromise.then(() => {
-        console.log(`${LOG_PREFIX} Initial indexing complete, registering providers`);
+        console.log(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_ACTIVATED)}`);
         registerLanguageProviders(context);
         refreshVisibleEditors();
     });
@@ -84,7 +85,7 @@ export function activate(context: vscode.ExtensionContext) {
     const reindexCommand = vscode.commands.registerCommand('colorbuddy.reindexCSSFiles', async () => {
         await indexWorkspaceCSSFiles();
         refreshVisibleEditors();
-        void vscode.window.showInformationMessage(`ColorBuddy: Re-indexed ${cssVariableRegistry.size} CSS variables`);
+        void vscode.window.showInformationMessage(`ColorBuddy: ${t(LocalizedStrings.EXTENSION_INDEXING_COMPLETE, cssVariableRegistry.size)}`);
     });
     context.subscriptions.push(reindexCommand);
 
@@ -103,11 +104,11 @@ export function activate(context: vscode.ExtensionContext) {
         });
         
         if (items.length === 0) {
-            void vscode.window.showInformationMessage('No colors found in workspace CSS variables.');
+            void vscode.window.showInformationMessage(t(LocalizedStrings.PALETTE_NO_COLORS));
         } else {
             void vscode.window.showQuickPick(items, {
-                title: `Workspace Color Palette (${items.length} unique colors)`,
-                placeHolder: 'Browse colors defined in your CSS variables'
+                title: t(LocalizedStrings.PALETTE_TITLE) + ` (${items.length})`,
+                placeHolder: t(LocalizedStrings.PALETTE_TITLE)
             });
         }
     });
@@ -464,7 +465,7 @@ function analyzeContext(selector: string): CSSVariableContext {
     };
 }
 async function indexWorkspaceCSSFiles(): Promise<void> {
-    console.log(`${LOG_PREFIX} Indexing CSS files for variable definitions...`);
+    console.log(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_INDEXING)}`);
     cssVariableRegistry.clear();
     cssClassColorRegistry.clear();
 
@@ -475,7 +476,7 @@ async function indexWorkspaceCSSFiles(): Promise<void> {
             const document = await vscode.workspace.openTextDocument(fileUri);
             await parseCSSFile(document);
         } catch (error) {
-            console.error(`[cb] Error parsing CSS file ${fileUri.fsPath}:`, error);
+            console.error(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_ERROR_CSS_INDEXING, fileUri.fsPath, String(error))}`);
         }
     }
 }
@@ -494,7 +495,7 @@ function resolveNestedVariables(
         
         // Circular reference detection
         if (visitedVars.has(nestedVarName)) {
-            console.error(`[cb] Circular reference detected: ${nestedVarName}`);
+            console.error(`${LOG_PREFIX} ${t(LocalizedStrings.ERROR_CIRCULAR_REFERENCE, nestedVarName)}`);
             return value; // Return original value to avoid infinite loop
         }
         
@@ -788,16 +789,16 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                     if (declarations && declarations.length > 0) {
                         const swatchColor = rgbaString(data.vscodeColor, false);
                         const swatchUri = createColorSwatchDataUri(swatchColor);
-                        markdown.appendMarkdown(`### CSS Class Color\n\n`);
+                        markdown.appendMarkdown(`### ${t(LocalizedStrings.TOOLTIP_CSS_CLASS)}\n\n`);
                         markdown.appendMarkdown(`![color swatch](${swatchUri}) \`${data.cssClassName}\`\n\n`);
                         
-                        markdown.appendMarkdown(`**Property:** \`${declarations[0].property}\`\n\n`);
-                        markdown.appendMarkdown(`**Value:** \`${declarations[0].value}\`\n\n`);
+                        markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_PROPERTY)}:** \`${declarations[0].property}\`\n\n`);
+                        markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_VALUE)}:** \`${declarations[0].value}\`\n\n`);
                         
                         markdown.appendMarkdown(`---\n\n`);
                         
                         for (const decl of declarations) {
-                            markdown.appendMarkdown(`Defined at [${vscode.workspace.asRelativePath(decl.uri)}:${decl.line + 1}](${decl.uri.toString()}#L${decl.line + 1})\n\n`);
+                            markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_DEFINED_IN)} [${vscode.workspace.asRelativePath(decl.uri)}:${decl.line + 1}](${decl.uri.toString()}#L${decl.line + 1})\n\n`);
                         }
                         
                         // Add accessibility information
@@ -808,13 +809,13 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                         const contrastBlack = getContrastRatio(data.vscodeColor, black);
                         
                         markdown.appendMarkdown(`---\n\n`);
-                        markdown.appendMarkdown(`**Accessibility:**\n\n`);
+                        markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_ACCESSIBILITY)}:**\n\n`);
                         
                         const whiteLevel = getAccessibilityLevel(contrastWhite);
                         const blackLevel = getAccessibilityLevel(contrastBlack);
                         
-                        markdown.appendMarkdown(`On white: ${contrastWhite.toFixed(2)}:1 (${whiteLevel.level})\n\n`);
-                        markdown.appendMarkdown(`On black: ${contrastBlack.toFixed(2)}:1 (${blackLevel.level})\n\n`);
+                        markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_CONTRAST_ON_WHITE)}: ${contrastWhite.toFixed(2)}:1 (${whiteLevel.level})\n\n`);
+                        markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_CONTRAST_ON_BLACK)}: ${contrastBlack.toFixed(2)}:1 (${blackLevel.level})\n\n`);
                     }
                 } else if (data.isCssVariable && data.variableName) {
                     // Show CSS variable or Tailwind class information
@@ -822,22 +823,22 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                     
                     if (!declarations || declarations.length === 0) {
                         // Handle undefined variable
-                        markdown.appendMarkdown(`### CSS Variable Not Found\n\n`);
+                        markdown.appendMarkdown(`### ${t(LocalizedStrings.TOOLTIP_VARIABLE_NOT_FOUND)}\n\n`);
                         markdown.appendMarkdown(`\`${data.originalText}\`\n\n`);
-                        markdown.appendMarkdown(`**Variable:** \`${data.variableName}\`\n\n`);
-                        markdown.appendMarkdown(`This variable is not defined in any CSS files in the workspace.\n\n`);
-                        markdown.appendMarkdown(`*Make sure the variable is declared in a CSS file.*`);
+                        markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_VARIABLE)}:** \`${data.variableName}\`\n\n`);
+                        markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_VARIABLE_NOT_FOUND_MESSAGE)}\n\n`);
+                        markdown.appendMarkdown(`*${t(LocalizedStrings.TOOLTIP_VARIABLE_NOT_FOUND_HINT)}*`);
                     } else {
                         // Check if this is a Tailwind class
                         if (data.isTailwindClass && data.tailwindClass) {
                             const swatchUri = createColorSwatchDataUri(data.normalizedColor);
-                            markdown.appendMarkdown(`### Tailwind Color Class\n\n`);
+                            markdown.appendMarkdown(`### ${t(LocalizedStrings.TOOLTIP_TAILWIND_CLASS)}\n\n`);
                             markdown.appendMarkdown(`![color swatch](${swatchUri}) \`${data.tailwindClass}\`\n\n`);
-                            markdown.appendMarkdown(`**Maps to:** \`${data.variableName}\`\n\n`);
+                            markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_MAPS_TO)}:** \`${data.variableName}\`\n\n`);
                             markdown.appendMarkdown(`---\n\n`);
                         } else {
                             const swatchUri = createColorSwatchDataUri(data.normalizedColor);
-                            markdown.appendMarkdown(`### CSS Variable Color\n\n`);
+                            markdown.appendMarkdown(`### ${t(LocalizedStrings.TOOLTIP_CSS_VARIABLE)}\n\n`);
                             markdown.appendMarkdown(`![color swatch](${swatchUri}) \`${data.originalText}\`\n\n`);
                         }
                         
@@ -850,7 +851,7 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                         const lightDecl = sorted.find(d => d.context.themeHint === 'light');
                         
                         if (!data.isTailwindClass) {
-                            markdown.appendMarkdown(`**Variable:** \`${data.variableName}\`\n\n`);
+                            markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_VARIABLE)}:** \`${data.variableName}\`\n\n`);
                             markdown.appendMarkdown(`---\n\n`);
                         }
                         
@@ -860,11 +861,11 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                             const rootParsed = parseColor(resolvedRoot);
                             if (rootParsed) {
                                 const swatchUri = createColorSwatchDataUri(rootParsed.cssString);
-                                markdown.appendMarkdown(`![color swatch](${swatchUri}) **Default:** \`${resolvedRoot}\`\n\n`);
+                                markdown.appendMarkdown(`![color swatch](${swatchUri}) **${t(LocalizedStrings.TOOLTIP_DEFAULT_THEME)}:** \`${resolvedRoot}\`\n\n`);
                             } else {
-                                markdown.appendMarkdown(`**Default:** \`${resolvedRoot}\`\n\n`);
+                                markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_DEFAULT_THEME)}:** \`${resolvedRoot}\`\n\n`);
                             }
-                            markdown.appendMarkdown(`Defined at [${vscode.workspace.asRelativePath(rootDecl.uri)}:${rootDecl.line + 1}](${rootDecl.uri.toString()}#L${rootDecl.line + 1})\n\n`);
+                            markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_DEFINED_IN)} [${vscode.workspace.asRelativePath(rootDecl.uri)}:${rootDecl.line + 1}](${rootDecl.uri.toString()}#L${rootDecl.line + 1})\n\n`);
                         }
                         
                         // Show light theme variant if available
@@ -873,11 +874,11 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                             const lightParsed = parseColor(resolvedLight);
                             if (lightParsed) {
                                 const swatchUri = createColorSwatchDataUri(lightParsed.cssString);
-                                markdown.appendMarkdown(`![color swatch](${swatchUri}) **Light Theme:** \`${resolvedLight}\`\n\n`);
+                                markdown.appendMarkdown(`![color swatch](${swatchUri}) **${t(LocalizedStrings.TOOLTIP_LIGHT_THEME)}:** \`${resolvedLight}\`\n\n`);
                             } else {
-                                markdown.appendMarkdown(`**Light Theme:** \`${resolvedLight}\`\n\n`);
+                                markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_LIGHT_THEME)}:** \`${resolvedLight}\`\n\n`);
                             }
-                            markdown.appendMarkdown(`Defined at [${vscode.workspace.asRelativePath(lightDecl.uri)}:${lightDecl.line + 1}](${lightDecl.uri.toString()}#L${lightDecl.line + 1})\n\n`);
+                            markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_DEFINED_IN)} [${vscode.workspace.asRelativePath(lightDecl.uri)}:${lightDecl.line + 1}](${lightDecl.uri.toString()}#L${lightDecl.line + 1})\n\n`);
                         }
                         
                         // Show dark theme variant if available
@@ -886,11 +887,11 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                             const darkParsed = parseColor(resolvedDark);
                             if (darkParsed) {
                                 const swatchUri = createColorSwatchDataUri(darkParsed.cssString);
-                                markdown.appendMarkdown(`![color swatch](${swatchUri}) **Dark Theme:** \`${resolvedDark}\`\n\n`);
+                                markdown.appendMarkdown(`![color swatch](${swatchUri}) **${t(LocalizedStrings.TOOLTIP_DARK_THEME)}:** \`${resolvedDark}\`\n\n`);
                             } else {
-                                markdown.appendMarkdown(`**Dark Theme:** \`${resolvedDark}\`\n\n`);
+                                markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_DARK_THEME)}:** \`${resolvedDark}\`\n\n`);
                             }
-                            markdown.appendMarkdown(`Defined at [${vscode.workspace.asRelativePath(darkDecl.uri)}:${darkDecl.line + 1}](${darkDecl.uri.toString()}#L${darkDecl.line + 1})\n\n`);
+                            markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_DEFINED_IN)} [${vscode.workspace.asRelativePath(darkDecl.uri)}:${darkDecl.line + 1}](${darkDecl.uri.toString()}#L${darkDecl.line + 1})\n\n`);
                         }
                         
                         // Add accessibility information for CSS variables and Tailwind classes
@@ -901,37 +902,37 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                         const contrastBlack = getContrastRatio(data.vscodeColor, black);
                         
                         markdown.appendMarkdown(`---\n\n`);
-                        markdown.appendMarkdown(`**Accessibility:**\n\n`);
+                        markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_ACCESSIBILITY)}:**\n\n`);
                         
                         const whiteLevel = getAccessibilityLevel(contrastWhite);
                         const blackLevel = getAccessibilityLevel(contrastBlack);
                         
-                        markdown.appendMarkdown(`On white: ${contrastWhite.toFixed(2)}:1 (${whiteLevel.level})\n\n`);
-                        markdown.appendMarkdown(`On black: ${contrastBlack.toFixed(2)}:1 (${blackLevel.level})\n\n`);
+                        markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_CONTRAST_ON_WHITE)}: ${contrastWhite.toFixed(2)}:1 (${whiteLevel.level})\n\n`);
+                        markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_CONTRAST_ON_BLACK)}: ${contrastBlack.toFixed(2)}:1 (${blackLevel.level})\n\n`);
                     }
                 } else {
                     // Show regular color information with format details
                     const swatchUri = createColorSwatchDataUri(data.normalizedColor);
-                    markdown.appendMarkdown(`### Color Preview\n\n`);
+                    markdown.appendMarkdown(`### ${t(LocalizedStrings.TOOLTIP_COLOR_PREVIEW)}\n\n`);
                     markdown.appendMarkdown(`![color swatch](${swatchUri}) \`${data.originalText}\`\n\n`);
                     
                     // Detect format type
-                    let formatType = 'Unknown';
+                    let formatType = t(LocalizedStrings.TOOLTIP_FORMAT_UNKNOWN);
                     if (data.originalText.startsWith('#')) {
-                        formatType = 'Hex';
+                        formatType = t(LocalizedStrings.TOOLTIP_FORMAT_HEX);
                     } else if (data.originalText.startsWith('rgb')) {
-                        formatType = 'RGB/RGBA';
+                        formatType = t(LocalizedStrings.TOOLTIP_FORMAT_RGBA);
                     } else if (data.originalText.startsWith('hsl')) {
-                        formatType = 'HSL/HSLA';
+                        formatType = t(LocalizedStrings.TOOLTIP_FORMAT_HSLA);
                     } else if (/^\d+(\.\d+)?\s+\d+(\.\d+)?%\s+\d+(\.\d+)?%/.test(data.originalText)) {
-                        formatType = 'Tailwind HSL';
+                        formatType = t(LocalizedStrings.TOOLTIP_FORMAT_TAILWIND_HSL);
                     }
                     
-                    markdown.appendMarkdown(`**Format:** ${formatType}\n\n`);
+                    markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_FORMAT)}:** ${formatType}\n\n`);
                     
                     // Show normalized value if different from original
                     if (data.normalizedColor !== data.originalText) {
-                        markdown.appendMarkdown(`**Normalized:** \`${data.normalizedColor}\`\n\n`);
+                        markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_NORMALIZED)}:** \`${data.normalizedColor}\`\n\n`);
                     }
                     
                     // Show RGB values
@@ -940,7 +941,7 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                     const b = Math.round(data.vscodeColor.blue * 255);
                     const a = data.vscodeColor.alpha;
                     
-                    markdown.appendMarkdown(`**RGB:** ${r}, ${g}, ${b}`);
+                    markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_RGB)}:** ${r}, ${g}, ${b}`);
                     if (a < 1) {
                         markdown.appendMarkdown(` (α: ${a.toFixed(2)})`);
                     }
@@ -951,13 +952,13 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                 const black = new vscode.Color(0, 0, 0, 1);                    const contrastWhite = getContrastRatio(data.vscodeColor, white);
                     const contrastBlack = getContrastRatio(data.vscodeColor, black);
                     
-                    markdown.appendMarkdown(`**Accessibility:**\n\n`);
+                    markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_ACCESSIBILITY)}:**\n\n`);
                     
                     const whiteLevel = getAccessibilityLevel(contrastWhite);
                     const blackLevel = getAccessibilityLevel(contrastBlack);
                     
-                    markdown.appendMarkdown(`On white: ${contrastWhite.toFixed(2)}:1 (${whiteLevel.level})\n\n`);
-                    markdown.appendMarkdown(`On black: ${contrastBlack.toFixed(2)}:1 (${blackLevel.level})\n\n`);
+                    markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_CONTRAST_ON_WHITE)}: ${contrastWhite.toFixed(2)}:1 (${whiteLevel.level})\n\n`);
+                    markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_CONTRAST_ON_BLACK)}: ${contrastBlack.toFixed(2)}:1 (${blackLevel.level})\n\n`);
                     
                     markdown.appendMarkdown(`---\n\n`);
                 }
