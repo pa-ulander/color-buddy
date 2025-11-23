@@ -4,6 +4,24 @@ All notable changes to the **ColorBuddy** extension will be documented in this f
 
 ## [Unreleased]
 
+_No unreleased changes yet._
+
+## [0.0.3] - 2025-11-23
+
+### Added
+- Restored inline color swatches for CSS variables and CSS class colors across CSS, SCSS, and Sass documents using the refreshed decoration styling
+- Sass sample file (`examples/example.sass`) showcasing HSL/HSLA usage and validating color detection
+- Integration coverage for CSS decorations and Sass color provider behavior to guard against regressions
+
+### Changed
+- Decoration pipeline now skips CSS variable declarations and Tailwind class substrings inside variable names to avoid duplicate swatches
+- Sass color provider restricts emitted formats to HSL/HSLA (plus Tailwind HSL) so VS Code's native RGB handling can operate without duplicating pickers
+- Updated decoration content configuration to align swatches ahead of text without nudging gutter alignment
+
+### Fixed
+- Removed stray swatches that previously appeared between the `--` prefix and CSS variable names (for example `--accent-foreground`)
+- Restored color picker support for Sass `hsl()`/`hsla()` definitions while keeping RGB/RGBA decorations single-sourced
+
 ### Changed
 - **Major Refactoring**: Reorganized codebase into modular service-based architecture
   - Reduced `extension.ts` from 1591 lines to 423 lines (73% reduction)
