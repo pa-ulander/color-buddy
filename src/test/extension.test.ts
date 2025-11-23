@@ -211,7 +211,7 @@ suite('Cache behaviour', () => {
 
 function stubExecuteCommand<T>(result: T): () => void {
 	const original = vscode.commands.executeCommand;
-	(vscode.commands as unknown as { executeCommand: typeof vscode.commands.executeCommand }).executeCommand = ((command: string, ..._args: unknown[]) => Promise.resolve(result)) as typeof vscode.commands.executeCommand;
+	(vscode.commands as unknown as { executeCommand: typeof vscode.commands.executeCommand }).executeCommand = ((_command: string, ..._args: unknown[]) => Promise.resolve(result)) as typeof vscode.commands.executeCommand;
 	return () => {
 		(vscode.commands as unknown as { executeCommand: typeof vscode.commands.executeCommand }).executeCommand = original;
 	};
