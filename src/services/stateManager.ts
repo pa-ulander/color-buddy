@@ -16,6 +16,7 @@ export class StateManager {
     private probingDocuments: Set<string>;
     private cachedLanguages: string[] | undefined;
     private visibleEditors: Set<string>;
+    private pendingRefreshes: Map<string, number>;
 
     constructor() {
         this.decorations = new Map();
@@ -23,6 +24,7 @@ export class StateManager {
         this.probingDocuments = new Set();
         this.cachedLanguages = undefined;
         this.visibleEditors = new Set();
+        this.pendingRefreshes = new Map();
     }
 
     /**
@@ -182,5 +184,35 @@ export class StateManager {
      */
     getVisibleEditors(): string[] {
         return Array.from(this.visibleEditors);
+    }
+
+    /**
+     * Check if a refresh is pending for an editor (within last 100ms)
+     */
+    isRefreshPending(editorKey: string): boolean {
+        const lastRefresh = this.pendingRefreshes.get(editorKey);
+        if (!lastRefresh) {
+            return false;
+        }
+        return (Date.now() - lastRefresh) < 100;
+    }
+
+    /**
+     * Mark a refresh as pending for an editor
+     */
+    markRefreshPending(editorKey: string): void {
+        this.pendingRefreshes.set(editorKey, Date.now());
+    }
+
+    /**
+     * Clear old pending refreshes (older than 1 second)
+     */
+    clearOldPendingRefreshes(): void {
+        const now = Date.now();
+        for (const [key, timestamp] of this.pendingRefreshes.entries()) {
+            if (now - timestamp > 1000) {
+                this.pendingRefreshes.delete(key);
+            }
+        }
     }
 }
