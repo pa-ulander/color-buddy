@@ -9,13 +9,22 @@ import type {
     ColorFormat
 } from './types';
 import { DEFAULT_LANGUAGES } from './types';
+import {
+    MAX_CSS_FILES,
+    CSS_FILE_PATTERN,
+    EXCLUDE_PATTERN,
+    COLOR_SWATCH_SIZE,
+    COLOR_SWATCH_MARGIN,
+    COLOR_SWATCH_BORDER,
+    LOG_PREFIX
+} from './utils/constants';
 
 process.on('uncaughtException', error => {
-    console.error('[cb] uncaught exception', error);
+    console.error(`${LOG_PREFIX} uncaught exception`, error);
 });
 
 process.on('unhandledRejection', reason => {
-    console.error('[cb] unhandled rejection', reason);
+    console.error(`${LOG_PREFIX} unhandled rejection`, reason);
 });
 
 const colorDataCache = new Map<string, DocumentColorCache>();
@@ -27,13 +36,13 @@ let providerSubscriptions: vscode.Disposable[] = [];
 let isProbingNativeColors = false;
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('[cb] activating...');
+    console.log(`${LOG_PREFIX} activating...`);
 
     // Index CSS files for variable definitions first (before registering providers)
     const indexingPromise = indexWorkspaceCSSFiles();
 
     // Watch for CSS file changes
-    const cssWatcher = vscode.workspace.createFileSystemWatcher('**/*.css');
+    const cssWatcher = vscode.workspace.createFileSystemWatcher(CSS_FILE_PATTERN);
     cssWatcher.onDidChange(uri => {
         void vscode.workspace.openTextDocument(uri).then(doc => {
             void parseCSSFile(doc).then(() => {
@@ -66,7 +75,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Wait for indexing to complete, then register providers and refresh
     void indexingPromise.then(() => {
-        console.log('[cb] Initial indexing complete, registering providers');
+        console.log(`${LOG_PREFIX} Initial indexing complete, registering providers`);
         registerLanguageProviders(context);
         refreshVisibleEditors();
     });
@@ -142,7 +151,7 @@ async function refreshEditor(editor: vscode.TextEditor): Promise<void> {
         const colorData = await ensureColorData(editor.document);
         applyCSSVariableDecorations(editor, colorData);
     } catch (error) {
-        console.error('[cb] failed to refresh color data', error);
+        console.error(`${LOG_PREFIX} failed to refresh color data`, error);
     }
 }
 
@@ -269,11 +278,10 @@ function applyCSSVariableDecorations(editor: vscode.TextEditor, colorData: Color
     const decoration = vscode.window.createTextEditorDecorationType({
         before: {
             contentText: '',
-            border: '1px solid',
-            borderColor: '#fff',
-            width: '10px',
-            height: '10px',
-            margin: '1px 4px 0 0'
+            border: COLOR_SWATCH_BORDER,
+            width: `${COLOR_SWATCH_SIZE}px`,
+            height: `${COLOR_SWATCH_SIZE}px`,
+            margin: COLOR_SWATCH_MARGIN
         },
         backgroundColor: 'transparent'
     });
@@ -289,10 +297,10 @@ function applyCSSVariableDecorations(editor: vscode.TextEditor, colorData: Color
                 renderOptions: {
                     before: {
                         backgroundColor: color,
-                        border: '1px solid #fff',
-                        width: '10px',
-                        height: '10px',
-                        margin: '1px 4px 0 0'
+                        border: COLOR_SWATCH_BORDER,
+                        width: `${COLOR_SWATCH_SIZE}px`,
+                        height: `${COLOR_SWATCH_SIZE}px`,
+                        margin: COLOR_SWATCH_MARGIN
                     }
                 }
             });
@@ -456,11 +464,11 @@ function analyzeContext(selector: string): CSSVariableContext {
     };
 }
 async function indexWorkspaceCSSFiles(): Promise<void> {
-    console.log('[cb] Indexing CSS files for variable definitions...');
+    console.log(`${LOG_PREFIX} Indexing CSS files for variable definitions...`);
     cssVariableRegistry.clear();
     cssClassColorRegistry.clear();
 
-    const cssFiles = await vscode.workspace.findFiles('**/*.css', '**/node_modules/**', 100);
+    const cssFiles = await vscode.workspace.findFiles(CSS_FILE_PATTERN, EXCLUDE_PATTERN, MAX_CSS_FILES);
     
     for (const fileUri of cssFiles) {
         try {
@@ -958,7 +966,7 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
             }
         }
     } catch (error) {
-        console.error('[cb] failed to provide hover', error);
+        console.error(`${LOG_PREFIX} failed to provide hover`, error);
     }
 
     return undefined;
@@ -999,7 +1007,7 @@ async function provideDocumentColors(document: vscode.TextDocument): Promise<vsc
             .filter(data => !data.isCssVariable && !data.isCssClass)
             .map(data => new vscode.ColorInformation(data.range, data.vscodeColor));
     } catch (error) {
-        console.error('[cb] failed to provide document colors', error);
+        console.error(`${LOG_PREFIX} failed to provide document colors`, error);
         return [];
     }
 }
