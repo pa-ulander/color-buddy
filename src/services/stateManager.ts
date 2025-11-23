@@ -15,12 +15,14 @@ export class StateManager {
     private providerSubscriptions: vscode.Disposable[];
     private probingDocuments: Set<string>;
     private cachedLanguages: string[] | undefined;
+    private visibleEditors: Set<string>;
 
     constructor() {
         this.decorations = new Map();
         this.providerSubscriptions = [];
         this.probingDocuments = new Set();
         this.cachedLanguages = undefined;
+        this.visibleEditors = new Set();
     }
 
     /**
@@ -152,5 +154,33 @@ export class StateManager {
      */
     get subscriptionCount(): number {
         return this.providerSubscriptions.length;
+    }
+
+    /**
+     * Mark an editor as visible
+     */
+    markEditorVisible(editorKey: string): void {
+        this.visibleEditors.add(editorKey);
+    }
+
+    /**
+     * Mark an editor as hidden
+     */
+    markEditorHidden(editorKey: string): void {
+        this.visibleEditors.delete(editorKey);
+    }
+
+    /**
+     * Check if an editor is currently visible
+     */
+    isEditorVisible(editorKey: string): boolean {
+        return this.visibleEditors.has(editorKey);
+    }
+
+    /**
+     * Get all visible editor keys
+     */
+    getVisibleEditors(): string[] {
+        return Array.from(this.visibleEditors);
     }
 }
