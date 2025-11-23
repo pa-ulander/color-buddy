@@ -37,7 +37,7 @@ const assert = __importStar(require("assert"));
 const vscode = __importStar(require("vscode"));
 const extension_1 = require("../extension");
 const helpers_1 = require("./helpers");
-const { parseColor, getFormatPriority, formatColorByFormat, provideDocumentColors, computeColorData, ensureColorData, registerLanguageProviders, colorDataCache, pendingColorComputations } = extension_1.__testing;
+const { parseColor, getFormatPriority, formatColorByFormat, provideDocumentColors, computeColorData, ensureColorData, registerLanguageProviders, cache } = extension_1.__testing;
 function assertClose(actual, expected, epsilon = 0.01) {
     assert.ok(Math.abs(actual - expected) <= epsilon, `Expected ${actual} to be within ${epsilon} of ${expected}`);
 }
@@ -86,8 +86,7 @@ suite('Integration pipeline', () => {
 				border-color: 200 50% 40% / 0.3;
 			}
 		`, 'plaintext');
-        colorDataCache.clear();
-        pendingColorComputations.clear();
+        cache.clear();
         const restoreCommand = stubExecuteCommand(undefined);
         const restoreConfig = stubWorkspaceLanguages(['plaintext']);
         try {
@@ -107,8 +106,7 @@ suite('Integration pipeline', () => {
 suite('Native provider guard', () => {
     test('computeColorData filters ranges claimed by native providers', async () => {
         const document = (0, helpers_1.createMockDocument)('#112233\n#445566', 'plaintext');
-        colorDataCache.clear();
-        pendingColorComputations.clear();
+        cache.clear();
         const firstRange = new vscode.Range(document.positionAt(0), document.positionAt(7));
         const nativeInfo = new vscode.ColorInformation(firstRange, new vscode.Color(0, 0, 0, 1));
         const restoreCommand = stubExecuteCommand([nativeInfo]);
@@ -200,8 +198,7 @@ suite('Cache behaviour', () => {
         const uri = vscode.Uri.parse('untitled:cache-test');
         const docV1 = createMockDocumentWithVersion('#abc', 'plaintext', 1, uri);
         const docV2 = createMockDocumentWithVersion('#abc\n#def', 'plaintext', 2, uri);
-        colorDataCache.clear();
-        pendingColorComputations.clear();
+        cache.clear();
         const restoreCommand = stubExecuteCommand(undefined);
         const restoreConfig = stubWorkspaceLanguages(['plaintext']);
         try {
@@ -211,9 +208,9 @@ suite('Cache behaviour', () => {
             const third = await ensureColorData(docV2);
             assert.notStrictEqual(third, first, 'expected recompute on version bump');
             (0, helpers_1.assertLength)(third, 2);
-            const cacheEntry = colorDataCache.get(uri.toString());
-            (0, helpers_1.assertDefined)(cacheEntry);
-            assert.strictEqual(cacheEntry.version, 2);
+            const cached = cache.get(uri.toString(), 2);
+            (0, helpers_1.assertDefined)(cached);
+            assert.strictEqual(cached.length, 2);
         }
         finally {
             restoreCommand();
