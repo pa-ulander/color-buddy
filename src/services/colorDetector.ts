@@ -14,6 +14,7 @@ export class ColorDetector {
     private static readonly TAILWIND_HSL_REGEX = /(?<![\w#(])([0-9]+(?:\.[0-9]+)?\s+[0-9]+(?:\.[0-9]+)?%\s+[0-9]+(?:\.[0-9]+)?%(?:\s*\/\s*(?:0?\.\d+|1(?:\.0+)?))?)/g;
     private static readonly CSS_VAR_REGEX = /var\(\s*(--[\w-]+)\s*\)/g;
     private static readonly CSS_VAR_IN_FUNC_REGEX = /\b(hsl|hsla|rgb|rgba)\(\s*var\(\s*(--[\w-]+)\s*\)\s*\)/gi;
+    private static readonly CSS_VAR_DECLARATION_REGEX = /(--[\w-]+)\s*:\s*([^\n;]+)/g;
     private static readonly TAILWIND_CLASS_REGEX = /\b(bg|text|border|ring|shadow|from|via|to|outline|decoration|divide|accent|caret)-(\w+(?:-\w+)?)\b/g;
     private static readonly CLASS_NAME_REGEX = /class\s*=\s*["']([^"']+)["']/g;
 
@@ -57,7 +58,8 @@ export class ColorDetector {
                 range,
                 originalText: matchText,
                 normalizedColor: parsed.cssString,
-                vscodeColor: parsed.vscodeColor
+                vscodeColor: parsed.vscodeColor,
+                format: parsed.formatPriority[0]
             });
         };
 
@@ -97,11 +99,25 @@ export class ColorDetector {
             this.collectCSSVariableReference(document, varInFuncMatch.index, varInFuncMatch[0], varInFuncMatch[2], results, seenRanges, varInFuncMatch[1] as 'hsl' | 'hsla' | 'rgb' | 'rgba');
         }
 
+        // Detect CSS variable declarations: --primary: 210 40% 98%;
+        const varDeclarationRegex = ColorDetector.reset(ColorDetector.CSS_VAR_DECLARATION_REGEX);
+        let varDeclMatch: RegExpExecArray | null;
+        while ((varDeclMatch = varDeclarationRegex.exec(text)) !== null) {
+            this.collectCSSVariableDeclaration(
+                document,
+                varDeclMatch.index,
+                varDeclMatch[1],
+                varDeclMatch[2],
+                results,
+                seenRanges
+            );
+        }
+
         // Detect Tailwind color classes: bg-primary, text-accent, border-destructive, etc.
         const tailwindClassRegex = ColorDetector.reset(ColorDetector.TAILWIND_CLASS_REGEX);
         let twClassMatch: RegExpExecArray | null;
         while ((twClassMatch = tailwindClassRegex.exec(text)) !== null) {
-            this.collectTailwindClass(document, twClassMatch.index, twClassMatch[0], twClassMatch[2], results, seenRanges);
+            this.collectTailwindClass(document, twClassMatch.index, twClassMatch[0], twClassMatch[2], results, seenRanges, text);
         }
         
         // Detect CSS class names with color properties: plums, bonk, etc.
@@ -171,7 +187,8 @@ export class ColorDetector {
             vscodeColor: parsed.vscodeColor,
             isCssVariable: true,
             variableName: variableName,
-            isWrappedInFunction: !!wrappingFunction
+            isWrappedInFunction: !!wrappingFunction,
+            format: parsed.formatPriority[0]
         });
     }
 
@@ -184,8 +201,13 @@ export class ColorDetector {
         fullMatch: string,
         colorName: string,
         results: ColorData[],
-        seenRanges: Set<string>
+        seenRanges: Set<string>,
+        sourceText: string
     ): void {
+        // Skip Tailwind matches that are part of CSS variable names like "--accent-foreground"
+        if (startIndex >= 2 && sourceText.slice(startIndex - 2, startIndex) === '--') {
+            return;
+        }
         // Map Tailwind class to CSS variable name
         const variableName = `--${colorName}`;
         
@@ -226,7 +248,8 @@ export class ColorDetector {
             isTailwindClass: true,
             tailwindClass: fullMatch,
             isCssVariable: true,
-            variableName: variableName
+            variableName: variableName,
+            format: parsed.formatPriority[0]
         });
     }
 
@@ -273,7 +296,8 @@ export class ColorDetector {
             normalizedColor: parsed.cssString,
             vscodeColor: parsed.vscodeColor,
             isCssClass: true,
-            cssClassName: className
+            cssClassName: className,
+            format: parsed.formatPriority[0]
         });
     }
 
@@ -312,6 +336,48 @@ export class ColorDetector {
         } while (replaced);
 
         return resolvedValue;
+    }
+
+    private collectCSSVariableDeclaration(
+        document: vscode.TextDocument,
+        startIndex: number,
+        variableName: string,
+        rawValue: string,
+        results: ColorData[],
+        seenRanges: Set<string>
+    ): void {
+        const value = rawValue.replace(/!important\s*$/i, '').trim();
+        if (!value) {
+            return;
+        }
+
+        const parsed = this.colorParser.parseColor(value);
+        if (!parsed) {
+            return;
+        }
+
+        const range = new vscode.Range(
+            document.positionAt(startIndex),
+            document.positionAt(startIndex + variableName.length)
+        );
+
+        const key = this.rangeKey(range);
+        if (seenRanges.has(key)) {
+            return;
+        }
+
+        seenRanges.add(key);
+
+        results.push({
+            range,
+            originalText: variableName,
+            normalizedColor: parsed.cssString,
+            vscodeColor: parsed.vscodeColor,
+            isCssVariable: true,
+            variableName,
+            isCssVariableDeclaration: true,
+            format: parsed.formatPriority[0]
+        });
     }
 
     /**
