@@ -20,12 +20,18 @@ export interface ColorData {
     
     /** VS Code Color object for use with color picker */
     vscodeColor: vscode.Color;
+
+    /** Original format detected for the color (when known) */
+    format?: ColorFormat;
     
     /** True if this is a CSS variable reference (e.g., var(--primary)) */
     isCssVariable?: boolean;
     
     /** The name of the CSS variable if isCssVariable is true */
     variableName?: string;
+    
+    /** True if this entry represents the variable's declaration site */
+    isCssVariableDeclaration?: boolean;
     
     /** True if the variable is wrapped in a function like hsl(var(--x)) */
     isWrappedInFunction?: boolean;
