@@ -222,7 +222,7 @@ suite('Cache behaviour', () => {
 });
 function stubExecuteCommand(result) {
     const original = vscode.commands.executeCommand;
-    vscode.commands.executeCommand = ((command, ..._args) => Promise.resolve(result));
+    vscode.commands.executeCommand = ((_command, ..._args) => Promise.resolve(result));
     return () => {
         vscode.commands.executeCommand = original;
     };
