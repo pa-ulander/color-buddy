@@ -1,9 +1,6 @@
 import * as vscode from 'vscode';
 import type {
     ColorData,
-    CSSVariableDeclaration,
-    CSSVariableContext,
-    CSSClassColorDeclaration,
     ColorFormat
 } from './types';
 import { DEFAULT_LANGUAGES } from './types';
@@ -17,7 +14,7 @@ import {
     LOG_PREFIX
 } from './utils/constants';
 import { t, LocalizedStrings } from './i18n/localization';
-import { Registry, Cache, StateManager, ColorParser, ColorFormatter, ColorDetector } from './services';
+import { Registry, Cache, StateManager, ColorParser, ColorFormatter, ColorDetector, CSSParser } from './services';
 
 process.on('uncaughtException', error => {
     console.error(`${LOG_PREFIX} uncaught exception`, error);
@@ -34,6 +31,7 @@ const stateManager = new StateManager();
 const colorParser = new ColorParser();
 const colorFormatter = new ColorFormatter();
 const colorDetector = new ColorDetector(registry, colorParser);
+const cssParser = new CSSParser(registry, colorParser);
 
 export function activate(context: vscode.ExtensionContext) {
     console.log(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_ACTIVATING)}`);
@@ -44,16 +42,16 @@ export function activate(context: vscode.ExtensionContext) {
     // Watch for CSS file changes
     const cssWatcher = vscode.workspace.createFileSystemWatcher(CSS_FILE_PATTERN);
     cssWatcher.onDidChange(uri => {
-        void vscode.workspace.openTextDocument(uri).then(doc => {
-            void parseCSSFile(doc).then(() => {
+        vscode.workspace.openTextDocument(uri).then(doc => {
+            void cssParser.parseCSSFile(doc).then(() => {
                 // Refresh all visible editors after CSS changes
                 refreshVisibleEditors();
             });
         });
     });
     cssWatcher.onDidCreate(uri => {
-        void vscode.workspace.openTextDocument(uri).then(doc => {
-            void parseCSSFile(doc).then(() => {
+        vscode.workspace.openTextDocument(uri).then(doc => {
+            void cssParser.parseCSSFile(doc).then(() => {
                 refreshVisibleEditors();
             });
         });
@@ -291,150 +289,6 @@ function applyCSSVariableDecorations(editor: vscode.TextEditor, colorData: Color
     }
 }
 
-async function parseCSSFile(document: vscode.TextDocument): Promise<void> {
-    const text = document.getText();
-    
-    // Simple regex-based CSS variable extraction
-    // Matches patterns like: --variable-name: value;
-    const cssVarRegex = /(--[\w-]+)\s*:\s*([^;]+);/g;
-    let match: RegExpExecArray | null;
-
-    while ((match = cssVarRegex.exec(text)) !== null) {
-        const varName = match[1];
-        const value = match[2].trim();
-        
-        // Find which selector this variable belongs to
-        const position = document.positionAt(match.index);
-        const selector = findContainingSelector(text, match.index);
-        const context = analyzeContext(selector);
-        
-        const declaration: CSSVariableDeclaration = {
-            name: varName,
-            value: value,
-            uri: document.uri,
-            line: position.line,
-            selector: selector,
-            context: context
-        };
-
-        // Add to registry
-        registry.addVariable(varName, declaration);
-    }
-    
-    // Extract CSS class colors
-    // Matches patterns like: .className { color: value; }
-    const colorPropertyRegex = /\.([\.\w-]+)\s*\{[^}]*?(color|background-color|border-color|background)\s*:\s*([^;]+);/g;
-    let colorMatch: RegExpExecArray | null;
-    
-    while ((colorMatch = colorPropertyRegex.exec(text)) !== null) {
-        const className = colorMatch[1];
-        const property = colorMatch[2];
-        const value = colorMatch[3].trim();
-        
-        // Try to resolve if it's a color value or CSS variable reference
-        let resolvedValue = value;
-        const varMatch = value.match(/var\(\s*(--[\w-]+)\s*\)/);
-        if (varMatch) {
-            const varName = varMatch[1];
-            const varDeclarations = registry.getVariable(varName);
-            if (varDeclarations && varDeclarations.length > 0) {
-                resolvedValue = resolveNestedVariables(varDeclarations[0].value);
-            }
-        }
-        
-        // Check if the value is a color
-        const parsed = colorParser.parseColor(resolvedValue);
-        if (parsed) {
-            const position = document.positionAt(colorMatch.index);
-            const selector = findContainingSelector(text, colorMatch.index);
-            
-            const declaration: CSSClassColorDeclaration = {
-                className: className,
-                property: property,
-                value: resolvedValue,
-                uri: document.uri,
-                line: position.line,
-                selector: selector
-            };
-            
-            registry.addClass(className, declaration);
-        }
-    }
-}
-
-function findContainingSelector(text: string, varIndex: number): string {
-    // Find the nearest selector before this variable declaration
-    // Look backwards for the opening brace, then find the selector
-    const beforeVar = text.substring(0, varIndex);
-    const lastOpenBrace = beforeVar.lastIndexOf('{');
-    
-    if (lastOpenBrace === -1) {
-        return ':root';
-    }
-
-    // Find the selector before the brace
-    const beforeBrace = text.substring(0, lastOpenBrace);
-    const lines = beforeBrace.split('\n');
-    
-    // Go backwards to find the selector
-    for (let i = lines.length - 1; i >= 0; i--) {
-        const line = lines[i].trim();
-        if (line && !line.startsWith('/*') && !line.endsWith('*/')) {
-            return line.replace(/\s+/g, ' ').trim();
-        }
-    }
-    
-    return ':root';
-}
-
-function analyzeContext(selector: string): CSSVariableContext {
-    const normalizedSelector = selector.toLowerCase().trim();
-    
-    // Calculate basic specificity (simplified CSS specificity)
-    let specificity = 0;
-    if (normalizedSelector === ':root' || normalizedSelector === 'html') {
-        specificity = 1;
-    } else if (normalizedSelector.includes('.')) {
-        specificity = 10 + (normalizedSelector.match(/\./g) || []).length * 10;
-    } else if (normalizedSelector.includes('#')) {
-        specificity = 100;
-    }
-    
-    // Detect context type
-    let type: 'root' | 'class' | 'media' | 'other' = 'other';
-    if (normalizedSelector === ':root' || normalizedSelector === 'html') {
-        type = 'root';
-    } else if (normalizedSelector.includes('.') || normalizedSelector.includes('[')) {
-        type = 'class';
-    } else if (normalizedSelector.includes('@media')) {
-        type = 'media';
-    }
-    
-    // Detect theme hints
-    let themeHint: 'light' | 'dark' | undefined;
-    if (normalizedSelector.includes('.dark') || 
-        normalizedSelector.includes('[data-theme="dark"]') ||
-        normalizedSelector.includes('[data-mode="dark"]')) {
-        themeHint = 'dark';
-    } else if (normalizedSelector.includes('.light') || 
-               normalizedSelector.includes('[data-theme="light"]')) {
-        themeHint = 'light';
-    }
-    
-    // Extract media query if present
-    let mediaQuery: string | undefined;
-    const mediaMatch = selector.match(/@media\s+([^{]+)/);
-    if (mediaMatch) {
-        mediaQuery = mediaMatch[1].trim();
-    }
-    
-    return {
-        type,
-        themeHint,
-        mediaQuery,
-        specificity
-    };
-}
 async function indexWorkspaceCSSFiles(): Promise<void> {
     console.log(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_INDEXING)}`);
     registry.clear();
@@ -444,54 +298,11 @@ async function indexWorkspaceCSSFiles(): Promise<void> {
     for (const fileUri of cssFiles) {
         try {
             const document = await vscode.workspace.openTextDocument(fileUri);
-            await parseCSSFile(document);
+            await cssParser.parseCSSFile(document);
         } catch (error) {
             console.error(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_ERROR_CSS_INDEXING, fileUri.fsPath, String(error))}`);
         }
     }
-}
-
-function resolveNestedVariables(
-    value: string, 
-    visitedVars: Set<string> = new Set()
-): string {
-    // Detect and resolve nested var() references recursively
-    const varPattern = /var\(\s*(--[\w-]+)\s*\)/g;
-    let match: RegExpExecArray | null;
-    let resolvedValue = value;
-    
-    while ((match = varPattern.exec(value)) !== null) {
-        const nestedVarName = match[1];
-        
-        // Circular reference detection
-        if (visitedVars.has(nestedVarName)) {
-            console.error(`${LOG_PREFIX} ${t(LocalizedStrings.ERROR_CIRCULAR_REFERENCE, nestedVarName)}`);
-            return value; // Return original value to avoid infinite loop
-        }
-        
-        // Look up the nested variable
-        const nestedDeclarations = registry.getVariable(nestedVarName);
-        if (!nestedDeclarations || nestedDeclarations.length === 0) {
-            continue; // Can't resolve, keep as-is
-        }
-        
-        // Use the first declaration (prioritize :root)
-        const nestedDecl = nestedDeclarations.sort((a: CSSVariableDeclaration, b: CSSVariableDeclaration) => 
-            a.context.specificity - b.context.specificity
-        )[0];
-        
-        // Mark this variable as visited
-        const newVisited = new Set(visitedVars);
-        newVisited.add(nestedVarName);
-        
-        // Recursively resolve the nested variable's value
-        const nestedResolved = resolveNestedVariables(nestedDecl.value, newVisited);
-        
-        // Replace the var() reference with the resolved value
-        resolvedValue = resolvedValue.replace(match[0], nestedResolved);
-    }
-    
-    return resolvedValue;
 }
 
 function createColorSwatchDataUri(color: string): string {
@@ -584,7 +395,7 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                         
                         // Show resolved values for different contexts
                         if (rootDecl) {
-                            const resolvedRoot = resolveNestedVariables(rootDecl.value);
+                            const resolvedRoot = cssParser.resolveNestedVariables(rootDecl.value);
                             const rootParsed = colorParser.parseColor(resolvedRoot);
                             if (rootParsed) {
                                 const swatchUri = createColorSwatchDataUri(rootParsed.cssString);
@@ -597,7 +408,7 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                         
                         // Show light theme variant if available
                         if (lightDecl && lightDecl !== rootDecl) {
-                            const resolvedLight = resolveNestedVariables(lightDecl.value);
+                            const resolvedLight = cssParser.resolveNestedVariables(lightDecl.value);
                             const lightParsed = colorParser.parseColor(resolvedLight);
                             if (lightParsed) {
                                 const swatchUri = createColorSwatchDataUri(lightParsed.cssString);
@@ -610,7 +421,7 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                         
                         // Show dark theme variant if available
                         if (darkDecl) {
-                            const resolvedDark = resolveNestedVariables(darkDecl.value);
+                            const resolvedDark = cssParser.resolveNestedVariables(darkDecl.value);
                             const darkParsed = colorParser.parseColor(resolvedDark);
                             if (darkParsed) {
                                 const swatchUri = createColorSwatchDataUri(darkParsed.cssString);
@@ -854,7 +665,7 @@ function extractWorkspaceColorPalette(): Map<string, vscode.Color> {
         if (!declarations) { continue; }
         
         for (const decl of declarations) {
-            const resolved = resolveNestedVariables(decl.value);
+            const resolved = cssParser.resolveNestedVariables(decl.value);
             const parsed = colorParser.parseColor(resolved);
             if (parsed) {
                 palette.set(parsed.cssString, parsed.vscodeColor);
@@ -870,6 +681,7 @@ export const __testing = {
     colorParser,
     colorFormatter,
     colorDetector,
+    cssParser,
     provideDocumentColors,
     computeColorData,
     ensureColorData,
