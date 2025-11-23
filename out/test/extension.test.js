@@ -37,13 +37,13 @@ const assert = __importStar(require("assert"));
 const vscode = __importStar(require("vscode"));
 const extension_1 = require("../extension");
 const helpers_1 = require("./helpers");
-const { parseColor, getFormatPriority, formatColorByFormat, provideDocumentColors, computeColorData, ensureColorData, registerLanguageProviders, cache } = extension_1.__testing;
+const { colorParser, formatColorByFormat, provideDocumentColors, computeColorData, ensureColorData, registerLanguageProviders, cache } = extension_1.__testing;
 function assertClose(actual, expected, epsilon = 0.01) {
     assert.ok(Math.abs(actual - expected) <= epsilon, `Expected ${actual} to be within ${epsilon} of ${expected}`);
 }
 suite('Color parsing', () => {
     test('hex colors normalize to rgb and keep hex priority', () => {
-        const parsed = parseColor('#ff0000');
+        const parsed = colorParser.parseColor('#ff0000');
         (0, helpers_1.assertDefined)(parsed, 'Expected hex color to parse');
         assert.strictEqual(parsed.cssString, 'rgb(255, 0, 0)');
         assert.strictEqual(parsed.formatPriority[0], 'hex');
@@ -53,7 +53,7 @@ suite('Color parsing', () => {
         assertClose(parsed.vscodeColor.alpha, 1);
     });
     test('tailwind compact HSL preserves alpha and priority', () => {
-        const parsed = parseColor('200 50% 40% / 0.25');
+        const parsed = colorParser.parseColor('200 50% 40% / 0.25');
         (0, helpers_1.assertDefined)(parsed, 'Expected Tailwind color to parse');
         assert.strictEqual(parsed.formatPriority[0], 'tailwind');
         assertClose(parsed.vscodeColor.alpha, 0.25);
@@ -61,7 +61,7 @@ suite('Color parsing', () => {
 });
 suite('Format helpers', () => {
     test('format priorities stay deduplicated and include fallbacks', () => {
-        const priority = getFormatPriority('hex');
+        const priority = colorParser.getFormatPriority('hex');
         assert.strictEqual(priority[0], 'hex');
         assert.strictEqual(priority[1], 'rgba');
         assert.ok(priority.includes('tailwind'));
