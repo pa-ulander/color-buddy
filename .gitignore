@@ -1,7 +1,8 @@
-!img
-node_modules
 .github/*.md
 .vscode-test/*
+!img
+node_modules
 dist
+logs
 out
 src/backup
