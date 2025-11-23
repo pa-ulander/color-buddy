@@ -15,8 +15,7 @@ const {
 	computeColorData,
 	ensureColorData,
 	registerLanguageProviders,
-	colorDataCache,
-	pendingColorComputations
+	cache
 } = __testing;
 
 function assertClose(actual: number, expected: number, epsilon = 0.01) {
@@ -72,8 +71,7 @@ suite('Integration pipeline', () => {
 				border-color: 200 50% 40% / 0.3;
 			}
 		`, 'plaintext');
-		colorDataCache.clear();
-		pendingColorComputations.clear();
+		cache.clear();
 
 		const restoreCommand = stubExecuteCommand(undefined);
 		const restoreConfig = stubWorkspaceLanguages(['plaintext']);
@@ -94,8 +92,7 @@ suite('Integration pipeline', () => {
 suite('Native provider guard', () => {
 	test('computeColorData filters ranges claimed by native providers', async () => {
 		const document = createMockDocument('#112233\n#445566', 'plaintext');
-		colorDataCache.clear();
-		pendingColorComputations.clear();
+		cache.clear();
 
 		const firstRange = new vscode.Range(document.positionAt(0), document.positionAt(7));
 		const nativeInfo = new vscode.ColorInformation(firstRange, new vscode.Color(0, 0, 0, 1));
@@ -192,8 +189,7 @@ suite('Cache behaviour', () => {
 		const uri = vscode.Uri.parse('untitled:cache-test');
 		const docV1 = createMockDocumentWithVersion('#abc', 'plaintext', 1, uri);
 		const docV2 = createMockDocumentWithVersion('#abc\n#def', 'plaintext', 2, uri);
-		colorDataCache.clear();
-		pendingColorComputations.clear();
+		cache.clear();
 
 		const restoreCommand = stubExecuteCommand(undefined);
 		const restoreConfig = stubWorkspaceLanguages(['plaintext']);
@@ -204,9 +200,9 @@ suite('Cache behaviour', () => {
 			const third = await ensureColorData(docV2);
 			assert.notStrictEqual(third, first, 'expected recompute on version bump');
 			assertLength(third, 2);
-			const cacheEntry = colorDataCache.get(uri.toString());
-			assertDefined(cacheEntry);
-			assert.strictEqual(cacheEntry.version, 2);
+			const cached = cache.get(uri.toString(), 2);
+			assertDefined(cached);
+			assert.strictEqual(cached.length, 2);
 		} finally {
 			restoreCommand();
 			restoreConfig();
