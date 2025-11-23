@@ -51,6 +51,7 @@ process.on('unhandledRejection', reason => {
 const registry = new services_1.Registry();
 const cache = new services_1.Cache();
 const stateManager = new services_1.StateManager();
+const colorParser = new services_1.ColorParser();
 function activate(context) {
     console.log(`${constants_1.LOG_PREFIX} ${(0, localization_1.t)(localization_1.LocalizedStrings.EXTENSION_ACTIVATING)}`);
     // Index CSS files for variable definitions first (before registering providers)
@@ -313,7 +314,7 @@ async function parseCSSFile(document) {
             }
         }
         // Check if the value is a color
-        const parsed = parseColor(resolvedValue);
+        const parsed = colorParser.parseColor(resolvedValue);
         if (parsed) {
             const position = document.positionAt(colorMatch.index);
             const selector = findContainingSelector(text, colorMatch.index);
@@ -460,7 +461,7 @@ function collectCSSVariableReference(document, startIndex, fullMatch, variableNa
         colorValue = `${wrappingFunction}(${colorValue})`;
     }
     // Try to parse the resolved value as a color
-    const parsed = parseColor(colorValue);
+    const parsed = colorParser.parseColor(colorValue);
     if (!parsed) {
         return;
     }
@@ -480,7 +481,7 @@ function collectColorData(document, text) {
     const seenRanges = new Set();
     const pushMatch = (startIndex, matchText) => {
         const range = new vscode.Range(document.positionAt(startIndex), document.positionAt(startIndex + matchText.length));
-        const parsed = parseColor(matchText);
+        const parsed = colorParser.parseColor(matchText);
         if (!parsed) {
             return;
         }
@@ -562,7 +563,7 @@ function collectTailwindClass(document, startIndex, fullMatch, colorName, result
     // Resolve nested variables recursively
     let colorValue = resolveNestedVariables(declaration.value);
     // Try to parse the resolved value as a color
-    const parsed = parseColor(colorValue);
+    const parsed = colorParser.parseColor(colorValue);
     if (!parsed) {
         return;
     }
@@ -593,7 +594,7 @@ function collectCSSClassColor(document, startIndex, className, results, seenRang
     const declaration = declarations[0];
     // Resolve any CSS variables in the value
     const resolvedValue = resolveNestedVariables(declaration.value);
-    const parsed = parseColor(resolvedValue);
+    const parsed = colorParser.parseColor(resolvedValue);
     if (!parsed) {
         return;
     }
@@ -685,7 +686,7 @@ async function provideColorHover(document, position) {
                         // Show resolved values for different contexts
                         if (rootDecl) {
                             const resolvedRoot = resolveNestedVariables(rootDecl.value);
-                            const rootParsed = parseColor(resolvedRoot);
+                            const rootParsed = colorParser.parseColor(resolvedRoot);
                             if (rootParsed) {
                                 const swatchUri = createColorSwatchDataUri(rootParsed.cssString);
                                 markdown.appendMarkdown(`![color swatch](${swatchUri}) **${(0, localization_1.t)(localization_1.LocalizedStrings.TOOLTIP_DEFAULT_THEME)}:** \`${resolvedRoot}\`\n\n`);
@@ -698,7 +699,7 @@ async function provideColorHover(document, position) {
                         // Show light theme variant if available
                         if (lightDecl && lightDecl !== rootDecl) {
                             const resolvedLight = resolveNestedVariables(lightDecl.value);
-                            const lightParsed = parseColor(resolvedLight);
+                            const lightParsed = colorParser.parseColor(resolvedLight);
                             if (lightParsed) {
                                 const swatchUri = createColorSwatchDataUri(lightParsed.cssString);
                                 markdown.appendMarkdown(`![color swatch](${swatchUri}) **${(0, localization_1.t)(localization_1.LocalizedStrings.TOOLTIP_LIGHT_THEME)}:** \`${resolvedLight}\`\n\n`);
@@ -711,7 +712,7 @@ async function provideColorHover(document, position) {
                         // Show dark theme variant if available
                         if (darkDecl) {
                             const resolvedDark = resolveNestedVariables(darkDecl.value);
-                            const darkParsed = parseColor(resolvedDark);
+                            const darkParsed = colorParser.parseColor(resolvedDark);
                             if (darkParsed) {
                                 const swatchUri = createColorSwatchDataUri(darkParsed.cssString);
                                 markdown.appendMarkdown(`![color swatch](${swatchUri}) **${(0, localization_1.t)(localization_1.LocalizedStrings.TOOLTIP_DARK_THEME)}:** \`${resolvedDark}\`\n\n`);
@@ -822,12 +823,12 @@ async function provideDocumentColors(document) {
 }
 function provideColorPresentations(color, context) {
     const originalText = context.document.getText(context.range);
-    const parsed = parseColor(originalText);
+    const parsed = colorParser.parseColor(originalText);
     if (!parsed) {
         return [];
     }
     const formattedValues = parsed.formatPriority
-        .map(format => formatColorByFormat(color, format))
+        .map((format) => formatColorByFormat(color, format))
         .filter((value) => Boolean(value));
     const uniqueValues = Array.from(new Set(formattedValues));
     if (uniqueValues.length === 0) {
@@ -838,69 +839,6 @@ function provideColorPresentations(color, context) {
         presentation.textEdit = vscode.TextEdit.replace(context.range, value);
         return presentation;
     });
-}
-function parseColorToVSCode(colorValue) {
-    const hexMatch = colorValue.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})?$/i);
-    if (hexMatch) {
-        const r = parseInt(hexMatch[1], 16) / 255;
-        const g = parseInt(hexMatch[2], 16) / 255;
-        const b = parseInt(hexMatch[3], 16) / 255;
-        const a = hexMatch[4] ? parseInt(hexMatch[4], 16) / 255 : 1;
-        return new vscode.Color(r, g, b, a);
-    }
-    const rgbMatch = colorValue.match(/^rgba?\(\s*([0-9]+)\s*,\s*([0-9]+)\s*,\s*([0-9]+)\s*(?:,\s*([0-9.]+)\s*)?\)$/i);
-    if (rgbMatch) {
-        const r = parseInt(rgbMatch[1], 10) / 255;
-        const g = parseInt(rgbMatch[2], 10) / 255;
-        const b = parseInt(rgbMatch[3], 10) / 255;
-        const a = rgbMatch[4] ? parseFloat(rgbMatch[4]) : 1;
-        return new vscode.Color(r, g, b, a);
-    }
-    const hslMatch = colorValue.match(/^hsla?\(\s*([0-9.]+)\s+([0-9.]+)%\s+([0-9.]+)%\s*(?:\/\s*([0-9.]+)\s*)?\)$/i);
-    if (hslMatch) {
-        const h = parseFloat(hslMatch[1]);
-        const s = parseFloat(hslMatch[2]);
-        const l = parseFloat(hslMatch[3]);
-        const a = hslMatch[4] ? parseFloat(hslMatch[4]) : 1;
-        const rgb = hslToRgb(h, s, l);
-        return new vscode.Color(rgb.r / 255, rgb.g / 255, rgb.b / 255, a);
-    }
-    return undefined;
-}
-function hslToRgb(h, s, l) {
-    h = h / 360;
-    s = s / 100;
-    l = l / 100;
-    let r, g, b;
-    if (s === 0) {
-        r = g = b = l;
-    }
-    else {
-        const hue2rgb = (p, q, t) => {
-            if (t < 0) {
-                t += 1;
-            }
-            if (t > 1) {
-                t -= 1;
-            }
-            if (t < 1 / 6) {
-                return p + (q - p) * 6 * t;
-            }
-            if (t < 1 / 2) {
-                return q;
-            }
-            if (t < 2 / 3) {
-                return p + (q - p) * (2 / 3 - t) * 6;
-            }
-            return p;
-        };
-        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-        const p = 2 * l - q;
-        r = hue2rgb(p, q, h + 1 / 3);
-        g = hue2rgb(p, q, h);
-        b = hue2rgb(p, q, h - 1 / 3);
-    }
-    return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
 }
 function rgbToHsl(r, g, b) {
     r /= 255;
@@ -926,140 +864,6 @@ function rgbToHsl(r, g, b) {
         }
     }
     return { h: h * 360, s: s * 100, l: l * 100 };
-}
-function parseColor(raw) {
-    const text = raw.trim();
-    const hexMatch = text.match(/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
-    if (hexMatch) {
-        const normalized = normalizeHex(text);
-        if (!normalized) {
-            return undefined;
-        }
-        const color = parseColorToVSCode(normalized);
-        if (!color) {
-            return undefined;
-        }
-        const sanitized = text.startsWith('#') ? text.slice(1) : text;
-        const hasAlpha = sanitized.length === 4 || sanitized.length === 8;
-        const originalFormat = hasAlpha ? 'hexAlpha' : 'hex';
-        return {
-            vscodeColor: color,
-            cssString: rgbaString(color, false),
-            formatPriority: getFormatPriority(originalFormat)
-        };
-    }
-    if (/^(?:rgb|rgba)\(/i.test(text)) {
-        const rgbaColor = parseRgbFunction(text);
-        if (!rgbaColor) {
-            return undefined;
-        }
-        return rgbaColor;
-    }
-    if (/^(?:hsl|hsla)\(/i.test(text)) {
-        const hslColor = parseHslFunction(text);
-        if (!hslColor) {
-            return undefined;
-        }
-        return hslColor;
-    }
-    const tailwindMatch = text.match(/^([0-9]+(?:\.[0-9]+)?)\s+([0-9]+(?:\.[0-9]+)?)%\s+([0-9]+(?:\.[0-9]+)?)%(?:\s*\/\s*(0?\.\d+|1(?:\.0+)?))?$/i);
-    if (tailwindMatch) {
-        const h = clamp(Number(tailwindMatch[1]), 0, 360);
-        const s = clamp(Number(tailwindMatch[2]), 0, 100);
-        const l = clamp(Number(tailwindMatch[3]), 0, 100);
-        const alpha = normalizeAlpha(tailwindMatch[4]);
-        const rgb = hslToRgb(h, s, l);
-        const color = new vscode.Color(rgb.r / 255, rgb.g / 255, rgb.b / 255, alpha);
-        return {
-            vscodeColor: color,
-            cssString: rgbaString(color, false),
-            formatPriority: getFormatPriority('tailwind')
-        };
-    }
-    return undefined;
-}
-function normalizeHex(value) {
-    const text = value.startsWith('#') ? value.slice(1) : value;
-    const length = text.length;
-    if (length !== 3 && length !== 4 && length !== 6 && length !== 8) {
-        return undefined;
-    }
-    if (length === 3 || length === 4) {
-        const expanded = text.split('').map(ch => ch + ch).join('');
-        return `#${expanded}`;
-    }
-    return `#${text.toLowerCase()}`;
-}
-function parseRgbFunction(raw) {
-    const match = raw.match(/^rgba?\((.*)\)$/i);
-    if (!match) {
-        return undefined;
-    }
-    const parts = match[1]
-        .replace(/\//g, ' ')
-        .replace(/,/g, ' ')
-        .split(/\s+/)
-        .map(part => part.trim())
-        .filter(part => part.length > 0);
-    if (parts.length < 3) {
-        return undefined;
-    }
-    const [rPart, gPart, bPart, aPart] = parts;
-    const r = normalizeRgbComponent(rPart);
-    const g = normalizeRgbComponent(gPart);
-    const b = normalizeRgbComponent(bPart);
-    if (r === undefined || g === undefined || b === undefined) {
-        return undefined;
-    }
-    const a = normalizeAlpha(aPart);
-    const color = new vscode.Color(r / 255, g / 255, b / 255, a);
-    const hasAlphaOriginal = /rgba/i.test(raw) || aPart !== undefined || raw.includes('/');
-    const originalFormat = hasAlphaOriginal ? 'rgba' : 'rgb';
-    return {
-        vscodeColor: color,
-        cssString: rgbaString(color, false),
-        formatPriority: getFormatPriority(originalFormat)
-    };
-}
-function parseHslFunction(raw) {
-    const match = raw.match(/^hsla?\((.*)\)$/i);
-    if (!match) {
-        return undefined;
-    }
-    const segments = match[1]
-        .replace(/\//g, ' ')
-        .replace(/,/g, ' ')
-        .split(/\s+/)
-        .map(segment => segment.trim())
-        .filter(Boolean);
-    if (segments.length < 3) {
-        return undefined;
-    }
-    const [hPart, sPart, lPart, aPart] = segments;
-    const h = clamp(parseFloat(hPart), 0, 360);
-    const s = clamp(parseFloat(sPart.replace('%', '')), 0, 100);
-    const l = clamp(parseFloat(lPart.replace('%', '')), 0, 100);
-    const a = normalizeAlpha(aPart);
-    const rgb = hslToRgb(h, s, l);
-    const color = new vscode.Color(rgb.r / 255, rgb.g / 255, rgb.b / 255, a);
-    const hasAlphaOriginal = /hsla/i.test(raw) || aPart !== undefined || raw.includes('/');
-    const originalFormat = hasAlphaOriginal ? 'hsla' : 'hsl';
-    return {
-        vscodeColor: color,
-        cssString: rgbaString(color, false),
-        formatPriority: getFormatPriority(originalFormat)
-    };
-}
-function normalizeRgbComponent(value) {
-    if (value.endsWith('%')) {
-        const percent = clamp(parseFloat(value), 0, 100);
-        return Math.round((percent / 100) * 255);
-    }
-    const numeric = Number(value);
-    if (Number.isNaN(numeric)) {
-        return undefined;
-    }
-    return clamp(Math.round(numeric), 0, 255);
 }
 function rgbaString(color, forceAlpha = false) {
     const r = Math.round(color.red * 255);
@@ -1090,26 +894,8 @@ function hslString(color, forceAlpha = false) {
     }
     return `hsla(${base} / ${color.alpha.toFixed(2)})`;
 }
-function clamp(value, min, max) {
-    return Math.min(Math.max(value, min), max);
-}
 function round(value) {
     return Math.round(value * 100) / 100;
-}
-function normalizeAlpha(value) {
-    if (value === undefined) {
-        return 1;
-    }
-    const trimmed = value.trim();
-    if (trimmed.endsWith('%')) {
-        const percent = clamp(parseFloat(trimmed), 0, 100);
-        return percent / 100;
-    }
-    const numeric = Number(trimmed);
-    if (Number.isNaN(numeric)) {
-        return 1;
-    }
-    return clamp(numeric, 0, 1);
 }
 function tailwindString(color) {
     const { h, s, l } = rgbToHsl(color.red * 255, color.green * 255, color.blue * 255);
@@ -1135,19 +921,6 @@ function formatColorByFormat(color, format) {
         default:
             return undefined;
     }
-}
-function getFormatPriority(original) {
-    const priorityMap = {
-        hex: ['hex', 'rgba', 'rgb', 'hexAlpha', 'hsl', 'hsla', 'tailwind'],
-        hexAlpha: ['hexAlpha', 'rgba', 'hex', 'hsla', 'hsl', 'tailwind'],
-        rgb: ['rgb', 'rgba', 'hex', 'hexAlpha', 'hsl', 'hsla', 'tailwind'],
-        rgba: ['rgba', 'hexAlpha', 'hex', 'hsla', 'hsl', 'tailwind'],
-        hsl: ['hsl', 'hsla', 'rgba', 'hex', 'hexAlpha', 'tailwind'],
-        hsla: ['hsla', 'rgba', 'hexAlpha', 'hex', 'tailwind', 'hsl'],
-        tailwind: ['tailwind', 'hsla', 'hsl', 'rgba', 'hexAlpha', 'hex']
-    };
-    const order = priorityMap[original] ?? ['rgba', 'hex'];
-    return Array.from(new Set(order));
 }
 function registerLanguageProviders(context) {
     stateManager.clearProviderSubscriptions();
@@ -1233,7 +1006,7 @@ function extractWorkspaceColorPalette() {
         }
         for (const decl of declarations) {
             const resolved = resolveNestedVariables(decl.value);
-            const parsed = parseColor(resolved);
+            const parsed = colorParser.parseColor(resolved);
             if (parsed) {
                 palette.set(parsed.cssString, parsed.vscodeColor);
             }
@@ -1243,8 +1016,7 @@ function extractWorkspaceColorPalette() {
 }
 // Export selected internals for targeted unit tests.
 exports.__testing = {
-    parseColor,
-    getFormatPriority,
+    colorParser,
     formatColorByFormat,
     collectColorData,
     provideDocumentColors,
