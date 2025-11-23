@@ -17,7 +17,7 @@ import {
     LOG_PREFIX
 } from './utils/constants';
 import { t, LocalizedStrings } from './i18n/localization';
-import { Registry, Cache, StateManager, ColorParser, ColorFormatter } from './services';
+import { Registry, Cache, StateManager, ColorParser, ColorFormatter, ColorDetector } from './services';
 
 process.on('uncaughtException', error => {
     console.error(`${LOG_PREFIX} uncaught exception`, error);
@@ -33,6 +33,7 @@ const cache = new Cache();
 const stateManager = new StateManager();
 const colorParser = new ColorParser();
 const colorFormatter = new ColorFormatter();
+const colorDetector = new ColorDetector(registry, colorParser);
 
 export function activate(context: vscode.ExtensionContext) {
     console.log(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_ACTIVATING)}`);
@@ -182,7 +183,7 @@ async function ensureColorData(document: vscode.TextDocument): Promise<ColorData
 
 async function computeColorData(document: vscode.TextDocument): Promise<ColorData[]> {
     const text = document.getText();
-    const allColorData = collectColorData(document, text);
+    const allColorData = colorDetector.collectColorData(document, text);
     const nativeRanges = await getNativeColorRangeKeys(document);
 
     if (nativeRanges.size === 0) {
@@ -491,249 +492,6 @@ function resolveNestedVariables(
     }
     
     return resolvedValue;
-}
-
-function collectCSSVariableReference(
-    document: vscode.TextDocument,
-    startIndex: number,
-    fullMatch: string,
-    variableName: string,
-    results: ColorData[],
-    seenRanges: Set<string>,
-    wrappingFunction?: 'hsl' | 'hsla' | 'rgb' | 'rgba'
-): void {
-    const range = new vscode.Range(
-        document.positionAt(startIndex),
-        document.positionAt(startIndex + fullMatch.length)
-    );
-
-    const key = rangeKey(range);
-    if (seenRanges.has(key)) {
-        return;
-    }
-
-    // Try to resolve the CSS variable
-    const declarations = registry.getVariable(variableName);
-    if (!declarations || declarations.length === 0) {
-        return;
-    }
-
-    // Use the first declaration (prioritize :root context)
-    const declaration = declarations.sort((a: CSSVariableDeclaration, b: CSSVariableDeclaration) => 
-        a.context.specificity - b.context.specificity
-    )[0];
-    
-    // Resolve nested variables recursively
-    let colorValue = resolveNestedVariables(declaration.value);
-
-    // If wrapped in a color function, prepend it
-    if (wrappingFunction) {
-        colorValue = `${wrappingFunction}(${colorValue})`;
-    }
-
-    // Try to parse the resolved value as a color
-    const parsed = colorParser.parseColor(colorValue);
-    if (!parsed) {
-        return;
-    }
-
-    seenRanges.add(key);
-
-    results.push({
-        range,
-        originalText: fullMatch,
-        normalizedColor: parsed.cssString,
-        vscodeColor: parsed.vscodeColor,
-        isCssVariable: true,
-        variableName: variableName,
-        isWrappedInFunction: !!wrappingFunction
-    });
-}
-
-function collectColorData(document: vscode.TextDocument, text: string): ColorData[] {
-    const results: ColorData[] = [];
-    const seenRanges = new Set<string>();
-
-    const pushMatch = (startIndex: number, matchText: string) => {
-        const range = new vscode.Range(
-            document.positionAt(startIndex),
-            document.positionAt(startIndex + matchText.length)
-        );
-
-        const parsed = colorParser.parseColor(matchText);
-        if (!parsed) {
-            return;
-        }
-
-        const key = `${range.start.line}:${range.start.character}-${range.end.line}:${range.end.character}`;
-        if (seenRanges.has(key)) {
-            return;
-        }
-
-        seenRanges.add(key);
-
-        results.push({
-            range,
-            originalText: matchText,
-            normalizedColor: parsed.cssString,
-            vscodeColor: parsed.vscodeColor
-        });
-    };
-
-    const hexRegex = /#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/g;
-    let hexMatch: RegExpExecArray | null;
-    while ((hexMatch = hexRegex.exec(text)) !== null) {
-        pushMatch(hexMatch.index, hexMatch[0]);
-    }
-
-    const funcRegex = /\b(?:rgb|rgba|hsl|hsla)\(([^\n]*?)\)/gi;
-    let funcMatch: RegExpExecArray | null;
-    while ((funcMatch = funcRegex.exec(text)) !== null) {
-        const fullMatch = funcMatch[0];
-        pushMatch(funcMatch.index, fullMatch);
-    }
-
-    const tailwindRegex = /(?<![\w#(])([0-9]+(?:\.[0-9]+)?\s+[0-9]+(?:\.[0-9]+)?%\s+[0-9]+(?:\.[0-9]+)?%(?:\s*\/\s*(?:0?\.\d+|1(?:\.0+)?))?)/g;
-    let tailwindMatch: RegExpExecArray | null;
-    while ((tailwindMatch = tailwindRegex.exec(text)) !== null) {
-        pushMatch(tailwindMatch.index, tailwindMatch[1]);
-    }
-
-    // Detect CSS variables: var(--variable-name)
-    const varRegex = /var\(\s*(--[\w-]+)\s*\)/g;
-    let varMatch: RegExpExecArray | null;
-    while ((varMatch = varRegex.exec(text)) !== null) {
-        collectCSSVariableReference(document, varMatch.index, varMatch[0], varMatch[1], results, seenRanges);
-    }
-
-    // Detect CSS variables wrapped in color functions: hsl(var(--variable)), rgb(var(--variable))
-    const varInFuncRegex = /\b(hsl|hsla|rgb|rgba)\(\s*var\(\s*(--[\w-]+)\s*\)\s*\)/gi;
-    let varInFuncMatch: RegExpExecArray | null;
-    while ((varInFuncMatch = varInFuncRegex.exec(text)) !== null) {
-        collectCSSVariableReference(document, varInFuncMatch.index, varInFuncMatch[0], varInFuncMatch[2], results, seenRanges, varInFuncMatch[1] as 'hsl' | 'hsla' | 'rgb' | 'rgba');
-    }
-
-    // Detect Tailwind color classes: bg-primary, text-accent, border-destructive, etc.
-    const tailwindClassRegex = /\b(bg|text|border|ring|shadow|from|via|to|outline|decoration|divide|accent|caret)-(\w+(?:-\w+)?)\b/g;
-    let twClassMatch: RegExpExecArray | null;
-    while ((twClassMatch = tailwindClassRegex.exec(text)) !== null) {
-        collectTailwindClass(document, twClassMatch.index, twClassMatch[0], twClassMatch[2], results, seenRanges);
-    }
-    
-    // Detect CSS class names with color properties: plums, bonk, etc.
-    const classNameRegex = /class\s*=\s*["']([^"']+)["']/g;
-    let classMatch: RegExpExecArray | null;
-    while ((classMatch = classNameRegex.exec(text)) !== null) {
-        const classList = classMatch[1].split(/\s+/);
-        for (const className of classList) {
-            if (className && registry.hasClass(className)) {
-                collectCSSClassColor(document, classMatch.index + classMatch[0].indexOf(className), className, results, seenRanges);
-            }
-        }
-    }
-
-    return results;
-}
-
-function collectTailwindClass(
-    document: vscode.TextDocument,
-    startIndex: number,
-    fullMatch: string,
-    colorName: string,
-    results: ColorData[],
-    seenRanges: Set<string>
-): void {
-    // Map Tailwind class to CSS variable name
-    const variableName = `--${colorName}`;
-    
-    const range = new vscode.Range(
-        document.positionAt(startIndex),
-        document.positionAt(startIndex + fullMatch.length)
-    );
-
-    const key = rangeKey(range);
-    if (seenRanges.has(key)) {
-        return;
-    }
-
-    // Try to resolve the CSS variable
-    const declarations = registry.getVariable(variableName);
-    if (!declarations || declarations.length === 0) {
-        // Class doesn't map to a known CSS variable
-        return;
-    }
-
-    // Use the first declaration (prioritize :root context)
-    const declaration = declarations.sort((a: CSSVariableDeclaration, b: CSSVariableDeclaration) => 
-        a.context.specificity - b.context.specificity
-    )[0];
-    
-    // Resolve nested variables recursively
-    let colorValue = resolveNestedVariables(declaration.value);
-
-    // Try to parse the resolved value as a color
-    const parsed = colorParser.parseColor(colorValue);
-    if (!parsed) {
-        return;
-    }
-
-    seenRanges.add(key);
-
-    results.push({
-        range,
-        originalText: fullMatch,
-        normalizedColor: parsed.cssString,
-        vscodeColor: parsed.vscodeColor,
-        isTailwindClass: true,
-        tailwindClass: fullMatch,
-        isCssVariable: true,
-        variableName: variableName
-    });
-}
-
-function collectCSSClassColor(
-    document: vscode.TextDocument,
-    startIndex: number,
-    className: string,
-    results: ColorData[],
-    seenRanges: Set<string>
-): void {
-    const range = new vscode.Range(
-        document.positionAt(startIndex),
-        document.positionAt(startIndex + className.length)
-    );
-
-    const key = rangeKey(range);
-    if (seenRanges.has(key)) {
-        return;
-    }
-
-    // Get the CSS class color declarations
-    const declarations = registry.getClass(className);
-    if (!declarations || declarations.length === 0) {
-        return;
-    }
-
-    // Use the first declaration
-    const declaration = declarations[0];
-    
-    // Resolve any CSS variables in the value
-    const resolvedValue = resolveNestedVariables(declaration.value);
-    const parsed = colorParser.parseColor(resolvedValue);
-    if (!parsed) {
-        return;
-    }
-
-    seenRanges.add(key);
-
-    results.push({
-        range,
-        originalText: className,
-        normalizedColor: parsed.cssString,
-        vscodeColor: parsed.vscodeColor,
-        isCssClass: true,
-        cssClassName: className
-    });
 }
 
 function createColorSwatchDataUri(color: string): string {
@@ -1111,7 +869,7 @@ function extractWorkspaceColorPalette(): Map<string, vscode.Color> {
 export const __testing = {
     colorParser,
     colorFormatter,
-    collectColorData,
+    colorDetector,
     provideDocumentColors,
     computeColorData,
     ensureColorData,
