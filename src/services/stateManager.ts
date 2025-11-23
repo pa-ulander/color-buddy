@@ -13,12 +13,14 @@ import * as vscode from 'vscode';
 export class StateManager {
     private decorations: Map<string, vscode.TextEditorDecorationType>;
     private providerSubscriptions: vscode.Disposable[];
-    private _isProbingNativeColors: boolean;
+    private probingDocuments: Set<string>;
+    private cachedLanguages: string[] | undefined;
 
     constructor() {
         this.decorations = new Map();
         this.providerSubscriptions = [];
-        this._isProbingNativeColors = false;
+        this.probingDocuments = new Set();
+        this.cachedLanguages = undefined;
     }
 
     /**
@@ -89,14 +91,43 @@ export class StateManager {
      * Get native color probing flag
      */
     get isProbingNativeColors(): boolean {
-        return this._isProbingNativeColors;
+        return this.probingDocuments.size > 0;
     }
 
     /**
-     * Set native color probing flag
+     * Track a document that is being probed for native colors.
      */
-    set isProbingNativeColors(value: boolean) {
-        this._isProbingNativeColors = value;
+    startNativeColorProbe(uri: vscode.Uri): void {
+        this.probingDocuments.add(uri.toString());
+    }
+
+    /**
+     * Stop tracking a document probe.
+     */
+    finishNativeColorProbe(uri: vscode.Uri): void {
+        this.probingDocuments.delete(uri.toString());
+    }
+
+    /**
+     * Determine if a document is currently being probed.
+     */
+    isDocumentProbing(uri: vscode.Uri): boolean {
+        return this.probingDocuments.has(uri.toString());
+    }
+
+    /**
+     * Cache the configured language list.
+     */
+    setCachedLanguages(languages: string[] | undefined): void {
+        this.cachedLanguages = languages;
+    }
+
+    getCachedLanguages(): string[] | undefined {
+        return this.cachedLanguages;
+    }
+
+    clearLanguageCache(): void {
+        this.cachedLanguages = undefined;
     }
 
     /**
@@ -105,6 +136,8 @@ export class StateManager {
     dispose(): void {
         this.clearAllDecorations();
         this.clearProviderSubscriptions();
+        this.probingDocuments.clear();
+        this.cachedLanguages = undefined;
     }
 
     /**
