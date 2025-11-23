@@ -214,6 +214,44 @@ suite('ColorDetector Service', () => {
             assert.strictEqual(results[0].originalText, 'var(--color-primary)');
             assert.ok(results[0].normalizedColor);
         });
+
+        test('should detect CSS variable declaration with hex color', () => {
+            const doc = createMockDocument(':root { --primary: #ff0000; }');
+            const results = detector.collectColorData(doc, doc.getText());
+
+            const declaration = results.find(r => r.isCssVariableDeclaration);
+            assert.ok(declaration, 'Expected to detect declaration');
+            assert.strictEqual(declaration?.variableName, '--primary');
+            assert.strictEqual(declaration?.originalText, '--primary');
+            // literal hex should still be detected separately
+            assert.ok(results.some(r => r.originalText === '#ff0000'));
+        });
+
+        test('should detect CSS variable declaration with Tailwind HSL', () => {
+            const doc = createMockDocument(':root { --accent: 210 40% 96.1%; }');
+            const results = detector.collectColorData(doc, doc.getText());
+
+            const declaration = results.find(r => r.isCssVariableDeclaration);
+            assert.ok(declaration, 'Expected declaration detection');
+            assert.strictEqual(declaration?.variableName, '--accent');
+            assert.ok(declaration?.normalizedColor.startsWith('rgb'));
+        });
+
+        test('should ignore non-color CSS variable declarations', () => {
+            const doc = createMockDocument(':root { --radius: 0.65rem; }');
+            const results = detector.collectColorData(doc, doc.getText());
+
+            assert.strictEqual(results.length, 0);
+        });
+
+        test('should detect Sass-style CSS variable declaration without semicolon', () => {
+            const doc = createMockDocument(`:root\n  --primary: 210 40% 96.1%`);
+            const results = detector.collectColorData(doc, doc.getText());
+
+            const declaration = results.find(r => r.isCssVariableDeclaration);
+            assert.ok(declaration, 'Expected declaration detection for Sass syntax');
+            assert.strictEqual(declaration?.variableName, '--primary');
+        });
     });
 
     suite('Tailwind Classes', () => {
