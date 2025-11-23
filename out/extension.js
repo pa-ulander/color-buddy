@@ -37,6 +37,7 @@ exports.__testing = void 0;
 exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
+const types_1 = require("./types");
 process.on('uncaughtException', error => {
     console.error('[cb] uncaught exception', error);
 });
@@ -50,50 +51,6 @@ const cssClassColorRegistry = new Map();
 const cssVariableDecorations = new Map();
 let providerSubscriptions = [];
 let isProbingNativeColors = false;
-const DEFAULT_LANGUAGES = [
-    'css',
-    'scss',
-    'sass',
-    'less',
-    'stylus',
-    'postcss',
-    'html',
-    'xml',
-    'svg',
-    'javascript',
-    'javascriptreact',
-    'typescript',
-    'typescriptreact',
-    'vue',
-    'svelte',
-    'astro',
-    'json',
-    'jsonc',
-    'yaml',
-    'toml',
-    'markdown',
-    'mdx',
-    'plaintext',
-    'python',
-    'ruby',
-    'php',
-    'perl',
-    'go',
-    'rust',
-    'java',
-    'kotlin',
-    'swift',
-    'csharp',
-    'cpp',
-    'c',
-    'objective-c',
-    'dart',
-    'lua',
-    'shellscript',
-    'powershell',
-    'sql',
-    'graphql'
-];
 function activate(context) {
     console.log('[cb] activating...');
     // Index CSS files for variable definitions first (before registering providers)
@@ -203,7 +160,7 @@ async function refreshEditor(editor) {
 }
 function shouldDecorate(document) {
     const config = vscode.workspace.getConfiguration('colorbuddy');
-    const languages = config.get('languages', DEFAULT_LANGUAGES);
+    const languages = config.get('languages', types_1.DEFAULT_LANGUAGES);
     if (!languages || languages.length === 0) {
         return false;
     }
@@ -1229,7 +1186,7 @@ function registerLanguageProviders(context) {
     providerSubscriptions.forEach(disposable => disposable.dispose());
     providerSubscriptions = [];
     const config = vscode.workspace.getConfiguration('colorbuddy');
-    const languages = config.get('languages', DEFAULT_LANGUAGES);
+    const languages = config.get('languages', types_1.DEFAULT_LANGUAGES);
     if (!languages || languages.length === 0) {
         return;
     }
