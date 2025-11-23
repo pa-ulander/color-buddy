@@ -68,13 +68,15 @@ export const LocalizedStrings = {
 	TOOLTIP_FORMAT_UNKNOWN: 'Unknown',
 } as const;
 
+export type LocalizedMessage = typeof LocalizedStrings[keyof typeof LocalizedStrings];
+
 /**
  * Get a localized string
  * @param message The English message (used as key and fallback)
  * @param args Optional arguments for string interpolation
  * @returns The localized string
  */
-export function t(message: string, ...args: Array<string | number>): string {
+export function t(message: LocalizedMessage, ...args: Array<string | number>): string {
 	if (args.length === 0) {
 		return l10n.t(message);
 	}
