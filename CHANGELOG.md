@@ -4,7 +4,6 @@ All notable changes to the **ColorBuddy** extension will be documented in this f
 
 ## [Unreleased]
 
-_No unreleased changes yet._
 
 ## [0.0.3] - 2025-11-23
 
