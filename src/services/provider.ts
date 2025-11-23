@@ -72,6 +72,13 @@ export class Provider {
     }
 
     /**
+     * Append a divider at the end of tooltip content
+     */
+    private appendTooltipFooter(markdown: vscode.MarkdownString): void {
+        markdown.appendMarkdown('---\n\n');
+    }
+
+    /**
      * Add accessibility information to tooltip markdown
      */
     private addAccessibilityInfo(markdown: vscode.MarkdownString, color: vscode.Color): void {
@@ -116,6 +123,7 @@ export class Provider {
         }
         
         this.addAccessibilityInfo(markdown, data.vscodeColor);
+        this.appendTooltipFooter(markdown);
     }
 
     /**
@@ -130,7 +138,8 @@ export class Provider {
             markdown.appendMarkdown(`\`${data.originalText}\`\n\n`);
             markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_VARIABLE)}:** \`${data.variableName}\`\n\n`);
             markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_VARIABLE_NOT_FOUND_MESSAGE)}\n\n`);
-            markdown.appendMarkdown(`*${t(LocalizedStrings.TOOLTIP_VARIABLE_NOT_FOUND_HINT)}*`);
+            markdown.appendMarkdown(`*${t(LocalizedStrings.TOOLTIP_VARIABLE_NOT_FOUND_HINT)}*\n\n`);
+            this.appendTooltipFooter(markdown);
             return;
         }
 
@@ -200,6 +209,7 @@ export class Provider {
         }
         
         this.addAccessibilityInfo(markdown, data.vscodeColor);
+        this.appendTooltipFooter(markdown);
     }
 
     /**
@@ -242,8 +252,7 @@ export class Provider {
         markdown.appendMarkdown(`\n\n`);
         
         this.addAccessibilityInfo(markdown, data.vscodeColor);
-        
-        markdown.appendMarkdown(`---\n\n`);
+        this.appendTooltipFooter(markdown);
     }
 
     /**
