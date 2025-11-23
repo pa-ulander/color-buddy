@@ -8,8 +8,7 @@ import {
 } from './helpers';
 
 const {
-	parseColor,
-	getFormatPriority,
+	colorParser,
 	formatColorByFormat,
 	provideDocumentColors,
 	computeColorData,
@@ -24,7 +23,7 @@ function assertClose(actual: number, expected: number, epsilon = 0.01) {
 
 suite('Color parsing', () => {
 	test('hex colors normalize to rgb and keep hex priority', () => {
-		const parsed = parseColor('#ff0000');
+		const parsed = colorParser.parseColor('#ff0000');
 		assertDefined(parsed, 'Expected hex color to parse');
 		assert.strictEqual(parsed.cssString, 'rgb(255, 0, 0)');
 		assert.strictEqual(parsed.formatPriority[0], 'hex');
@@ -35,7 +34,7 @@ suite('Color parsing', () => {
 	});
 
 	test('tailwind compact HSL preserves alpha and priority', () => {
-		const parsed = parseColor('200 50% 40% / 0.25');
+		const parsed = colorParser.parseColor('200 50% 40% / 0.25');
 		assertDefined(parsed, 'Expected Tailwind color to parse');
 		assert.strictEqual(parsed.formatPriority[0], 'tailwind');
 		assertClose(parsed.vscodeColor.alpha, 0.25);
@@ -44,7 +43,7 @@ suite('Color parsing', () => {
 
 suite('Format helpers', () => {
 	test('format priorities stay deduplicated and include fallbacks', () => {
-		const priority = getFormatPriority('hex');
+		const priority = colorParser.getFormatPriority('hex');
 		assert.strictEqual(priority[0], 'hex');
 		assert.strictEqual(priority[1], 'rgba');
 		assert.ok(priority.includes('tailwind'));
