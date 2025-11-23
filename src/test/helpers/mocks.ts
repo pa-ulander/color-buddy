@@ -87,6 +87,7 @@ export function createMockColorData(overrides?: Partial<ColorData>): ColorData {
         originalText: '#ff0000',
         normalizedColor: 'rgb(255, 0, 0)',
         vscodeColor: defaultColor,
+        format: 'hex',
         isCssVariable: false,
         isTailwindClass: false,
         isCssClass: false,
