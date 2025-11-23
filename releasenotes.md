@@ -2,6 +2,39 @@
 
 ---
 
+## Version 0.0.3 - November 23, 2025
+
+### Swatch Revival & Sass Parity
+
+This release is focused on refactoring and general code improvements.
+Not so much on adding new features.  
+Tightened Sass support so color tooling feels consistent across your stylesheets.
+
+### What Changed
+
+**Inline Swatches Return**
+- Reinstated inline decorations for CSS variables and class colors in CSS, SCSS, and Sass files using the new decoration styling
+- Removed stray swatches that previously appeared between the `--` prefix and variable names
+- Ensured Tailwind class lookups inside variable names no longer create duplicate decorations
+
+**Sass Color Picker Parity**
+- Sass HSL/HSLA literals now light up with both inline swatches and the native VS Code color picker
+- RGB/RGBA literals continue to rely on VS Code's built-in provider, preventing duplicate pickers while preserving tooling coverage
+
+**Quality Guardrails**
+- Added targeted integration tests covering CSS decorations and Sass color provider output
+- Included an example Sass file to verify compact HSL workflows end-to-end
+
+### Why This Matters
+
+Design systems often mix CSS variables, Tailwind tokens, and nested Sass syntax. Version 0.0.3 keeps the editor view tidy, restores the visual context around variables, and guarantees Sass authors get the same editing experience as their CSS/SCSS counterparts.
+
+### Upgrading
+
+Just update via the VS Code marketplace. Decorations refresh automatically; there are no configuration changes required.
+
+---
+
 ## Version 0.0.2 - November 20, 2025
 
 ### Rebranding & Polish Release
