@@ -4,7 +4,6 @@ import type {
     CSSVariableDeclaration,
     CSSVariableContext,
     CSSClassColorDeclaration,
-    ParsedColor,
     ColorFormat
 } from './types';
 import { DEFAULT_LANGUAGES } from './types';
@@ -18,7 +17,7 @@ import {
     LOG_PREFIX
 } from './utils/constants';
 import { t, LocalizedStrings } from './i18n/localization';
-import { Registry, Cache, StateManager } from './services';
+import { Registry, Cache, StateManager, ColorParser } from './services';
 
 process.on('uncaughtException', error => {
     console.error(`${LOG_PREFIX} uncaught exception`, error);
@@ -32,6 +31,7 @@ process.on('unhandledRejection', reason => {
 const registry = new Registry();
 const cache = new Cache();
 const stateManager = new StateManager();
+const colorParser = new ColorParser();
 
 export function activate(context: vscode.ExtensionContext) {
     console.log(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_ACTIVATING)}`);
@@ -341,7 +341,7 @@ async function parseCSSFile(document: vscode.TextDocument): Promise<void> {
         }
         
         // Check if the value is a color
-        const parsed = parseColor(resolvedValue);
+        const parsed = colorParser.parseColor(resolvedValue);
         if (parsed) {
             const position = document.positionAt(colorMatch.index);
             const selector = findContainingSelector(text, colorMatch.index);
@@ -531,7 +531,7 @@ function collectCSSVariableReference(
     }
 
     // Try to parse the resolved value as a color
-    const parsed = parseColor(colorValue);
+    const parsed = colorParser.parseColor(colorValue);
     if (!parsed) {
         return;
     }
@@ -559,7 +559,7 @@ function collectColorData(document: vscode.TextDocument, text: string): ColorDat
             document.positionAt(startIndex + matchText.length)
         );
 
-        const parsed = parseColor(matchText);
+        const parsed = colorParser.parseColor(matchText);
         if (!parsed) {
             return;
         }
@@ -671,7 +671,7 @@ function collectTailwindClass(
     let colorValue = resolveNestedVariables(declaration.value);
 
     // Try to parse the resolved value as a color
-    const parsed = parseColor(colorValue);
+    const parsed = colorParser.parseColor(colorValue);
     if (!parsed) {
         return;
     }
@@ -718,7 +718,7 @@ function collectCSSClassColor(
     
     // Resolve any CSS variables in the value
     const resolvedValue = resolveNestedVariables(declaration.value);
-    const parsed = parseColor(resolvedValue);
+    const parsed = colorParser.parseColor(resolvedValue);
     if (!parsed) {
         return;
     }
@@ -826,7 +826,7 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                         // Show resolved values for different contexts
                         if (rootDecl) {
                             const resolvedRoot = resolveNestedVariables(rootDecl.value);
-                            const rootParsed = parseColor(resolvedRoot);
+                            const rootParsed = colorParser.parseColor(resolvedRoot);
                             if (rootParsed) {
                                 const swatchUri = createColorSwatchDataUri(rootParsed.cssString);
                                 markdown.appendMarkdown(`![color swatch](${swatchUri}) **${t(LocalizedStrings.TOOLTIP_DEFAULT_THEME)}:** \`${resolvedRoot}\`\n\n`);
@@ -839,7 +839,7 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                         // Show light theme variant if available
                         if (lightDecl && lightDecl !== rootDecl) {
                             const resolvedLight = resolveNestedVariables(lightDecl.value);
-                            const lightParsed = parseColor(resolvedLight);
+                            const lightParsed = colorParser.parseColor(resolvedLight);
                             if (lightParsed) {
                                 const swatchUri = createColorSwatchDataUri(lightParsed.cssString);
                                 markdown.appendMarkdown(`![color swatch](${swatchUri}) **${t(LocalizedStrings.TOOLTIP_LIGHT_THEME)}:** \`${resolvedLight}\`\n\n`);
@@ -852,7 +852,7 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                         // Show dark theme variant if available
                         if (darkDecl) {
                             const resolvedDark = resolveNestedVariables(darkDecl.value);
-                            const darkParsed = parseColor(resolvedDark);
+                            const darkParsed = colorParser.parseColor(resolvedDark);
                             if (darkParsed) {
                                 const swatchUri = createColorSwatchDataUri(darkParsed.cssString);
                                 markdown.appendMarkdown(`![color swatch](${swatchUri}) **${t(LocalizedStrings.TOOLTIP_DARK_THEME)}:** \`${resolvedDark}\`\n\n`);
@@ -979,15 +979,15 @@ async function provideDocumentColors(document: vscode.TextDocument): Promise<vsc
 
 function provideColorPresentations(color: vscode.Color, context: { document: vscode.TextDocument; range: vscode.Range }): vscode.ColorPresentation[] {
     const originalText = context.document.getText(context.range);
-    const parsed = parseColor(originalText);
+    const parsed = colorParser.parseColor(originalText);
 
     if (!parsed) {
         return [];
     }
 
     const formattedValues = parsed.formatPriority
-        .map(format => formatColorByFormat(color, format))
-        .filter((value): value is string => Boolean(value));
+        .map((format: ColorFormat) => formatColorByFormat(color, format))
+        .filter((value: string | undefined): value is string => Boolean(value));
 
     const uniqueValues = Array.from(new Set(formattedValues));
 
@@ -1000,67 +1000,6 @@ function provideColorPresentations(color: vscode.Color, context: { document: vsc
         presentation.textEdit = vscode.TextEdit.replace(context.range, value);
         return presentation;
     });
-}
-
-function parseColorToVSCode(colorValue: string): vscode.Color | undefined {
-    const hexMatch = colorValue.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})?$/i);
-    if (hexMatch) {
-        const r = parseInt(hexMatch[1], 16) / 255;
-        const g = parseInt(hexMatch[2], 16) / 255;
-        const b = parseInt(hexMatch[3], 16) / 255;
-        const a = hexMatch[4] ? parseInt(hexMatch[4], 16) / 255 : 1;
-        return new vscode.Color(r, g, b, a);
-    }
-
-    const rgbMatch = colorValue.match(/^rgba?\(\s*([0-9]+)\s*,\s*([0-9]+)\s*,\s*([0-9]+)\s*(?:,\s*([0-9.]+)\s*)?\)$/i);
-    if (rgbMatch) {
-        const r = parseInt(rgbMatch[1], 10) / 255;
-        const g = parseInt(rgbMatch[2], 10) / 255;
-        const b = parseInt(rgbMatch[3], 10) / 255;
-        const a = rgbMatch[4] ? parseFloat(rgbMatch[4]) : 1;
-        return new vscode.Color(r, g, b, a);
-    }
-
-    const hslMatch = colorValue.match(/^hsla?\(\s*([0-9.]+)\s+([0-9.]+)%\s+([0-9.]+)%\s*(?:\/\s*([0-9.]+)\s*)?\)$/i);
-    if (hslMatch) {
-        const h = parseFloat(hslMatch[1]);
-        const s = parseFloat(hslMatch[2]);
-        const l = parseFloat(hslMatch[3]);
-        const a = hslMatch[4] ? parseFloat(hslMatch[4]) : 1;
-        const rgb = hslToRgb(h, s, l);
-        return new vscode.Color(rgb.r / 255, rgb.g / 255, rgb.b / 255, a);
-    }
-
-    return undefined;
-}
-
-function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
-    h = h / 360;
-    s = s / 100;
-    l = l / 100;
-
-    let r, g, b;
-
-    if (s === 0) {
-        r = g = b = l;
-    } else {
-        const hue2rgb = (p: number, q: number, t: number) => {
-            if (t < 0) { t += 1; }
-            if (t > 1) { t -= 1; }
-            if (t < 1/6) { return p + (q - p) * 6 * t; }
-            if (t < 1/2) { return q; }
-            if (t < 2/3) { return p + (q - p) * (2/3 - t) * 6; }
-            return p;
-        };
-
-        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-        const p = 2 * l - q;
-        r = hue2rgb(p, q, h + 1/3);
-        g = hue2rgb(p, q, h);
-        b = hue2rgb(p, q, h - 1/3);
-    }
-
-    return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
 }
 
 function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
@@ -1085,162 +1024,6 @@ function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: n
     }
 
     return { h: h * 360, s: s * 100, l: l * 100 };
-}
-
-function parseColor(raw: string): ParsedColor | undefined {
-    const text = raw.trim();
-
-    const hexMatch = text.match(/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
-    if (hexMatch) {
-        const normalized = normalizeHex(text);
-        if (!normalized) {
-            return undefined;
-        }
-        const color = parseColorToVSCode(normalized);
-        if (!color) {
-            return undefined;
-        }
-        const sanitized = text.startsWith('#') ? text.slice(1) : text;
-        const hasAlpha = sanitized.length === 4 || sanitized.length === 8;
-        const originalFormat: ColorFormat = hasAlpha ? 'hexAlpha' : 'hex';
-        return {
-            vscodeColor: color,
-            cssString: rgbaString(color, false),
-            formatPriority: getFormatPriority(originalFormat)
-        } satisfies ParsedColor;
-    }
-
-    if (/^(?:rgb|rgba)\(/i.test(text)) {
-        const rgbaColor = parseRgbFunction(text);
-        if (!rgbaColor) {
-            return undefined;
-        }
-        return rgbaColor;
-    }
-
-    if (/^(?:hsl|hsla)\(/i.test(text)) {
-        const hslColor = parseHslFunction(text);
-        if (!hslColor) {
-            return undefined;
-        }
-        return hslColor;
-    }
-
-    const tailwindMatch = text.match(/^([0-9]+(?:\.[0-9]+)?)\s+([0-9]+(?:\.[0-9]+)?)%\s+([0-9]+(?:\.[0-9]+)?)%(?:\s*\/\s*(0?\.\d+|1(?:\.0+)?))?$/i);
-    if (tailwindMatch) {
-        const h = clamp(Number(tailwindMatch[1]), 0, 360);
-        const s = clamp(Number(tailwindMatch[2]), 0, 100);
-        const l = clamp(Number(tailwindMatch[3]), 0, 100);
-        const alpha = normalizeAlpha(tailwindMatch[4]);
-        const rgb = hslToRgb(h, s, l);
-        const color = new vscode.Color(rgb.r / 255, rgb.g / 255, rgb.b / 255, alpha);
-        return {
-            vscodeColor: color,
-            cssString: rgbaString(color, false),
-            formatPriority: getFormatPriority('tailwind')
-        } satisfies ParsedColor;
-    }
-
-    return undefined;
-}
-
-function normalizeHex(value: string): string | undefined {
-    const text = value.startsWith('#') ? value.slice(1) : value;
-    const length = text.length;
-    if (length !== 3 && length !== 4 && length !== 6 && length !== 8) {
-        return undefined;
-    }
-
-    if (length === 3 || length === 4) {
-        const expanded = text.split('').map(ch => ch + ch).join('');
-        return `#${expanded}`;
-    }
-
-    return `#${text.toLowerCase()}`;
-}
-
-function parseRgbFunction(raw: string): ParsedColor | undefined {
-    const match = raw.match(/^rgba?\((.*)\)$/i);
-    if (!match) {
-        return undefined;
-    }
-
-    const parts = match[1]
-        .replace(/\//g, ' ')
-        .replace(/,/g, ' ')
-        .split(/\s+/)
-        .map(part => part.trim())
-        .filter(part => part.length > 0);
-
-    if (parts.length < 3) {
-        return undefined;
-    }
-
-    const [rPart, gPart, bPart, aPart] = parts;
-    const r = normalizeRgbComponent(rPart);
-    const g = normalizeRgbComponent(gPart);
-    const b = normalizeRgbComponent(bPart);
-    if (r === undefined || g === undefined || b === undefined) {
-        return undefined;
-    }
-
-    const a = normalizeAlpha(aPart);
-    const color = new vscode.Color(r / 255, g / 255, b / 255, a);
-    const hasAlphaOriginal = /rgba/i.test(raw) || aPart !== undefined || raw.includes('/');
-    const originalFormat: ColorFormat = hasAlphaOriginal ? 'rgba' : 'rgb';
-
-    return {
-        vscodeColor: color,
-        cssString: rgbaString(color, false),
-        formatPriority: getFormatPriority(originalFormat)
-    } satisfies ParsedColor;
-}
-
-function parseHslFunction(raw: string): ParsedColor | undefined {
-    const match = raw.match(/^hsla?\((.*)\)$/i);
-    if (!match) {
-        return undefined;
-    }
-
-    const segments = match[1]
-        .replace(/\//g, ' ')
-        .replace(/,/g, ' ')
-        .split(/\s+/)
-        .map(segment => segment.trim())
-        .filter(Boolean);
-
-    if (segments.length < 3) {
-        return undefined;
-    }
-
-    const [hPart, sPart, lPart, aPart] = segments;
-    const h = clamp(parseFloat(hPart), 0, 360);
-    const s = clamp(parseFloat(sPart.replace('%', '')), 0, 100);
-    const l = clamp(parseFloat(lPart.replace('%', '')), 0, 100);
-    const a = normalizeAlpha(aPart);
-    const rgb = hslToRgb(h, s, l);
-    const color = new vscode.Color(rgb.r / 255, rgb.g / 255, rgb.b / 255, a);
-    const hasAlphaOriginal = /hsla/i.test(raw) || aPart !== undefined || raw.includes('/');
-    const originalFormat: ColorFormat = hasAlphaOriginal ? 'hsla' : 'hsl';
-
-    return {
-        vscodeColor: color,
-        cssString: rgbaString(color, false),
-        formatPriority: getFormatPriority(originalFormat)
-    } satisfies ParsedColor;
-}
-
-function normalizeRgbComponent(value: string): number | undefined {
-    if (value.endsWith('%')) {
-        const percent = clamp(parseFloat(value), 0, 100);
-        return Math.round((percent / 100) * 255);
-    }
-
-    const numeric = Number(value);
-    if (Number.isNaN(numeric)) {
-        return undefined;
-    }
-    return clamp(Math.round(numeric), 0, 255);
 }
 
 function rgbaString(color: vscode.Color, forceAlpha = false): string {
@@ -1275,31 +1058,8 @@ function hslString(color: vscode.Color, forceAlpha = false): string {
     return `hsla(${base} / ${color.alpha.toFixed(2)})`;
 }
 
-function clamp(value: number, min: number, max: number): number {
-    return Math.min(Math.max(value, min), max);
-}
-
 function round(value: number): number {
     return Math.round(value * 100) / 100;
-}
-
-function normalizeAlpha(value: string | undefined): number {
-    if (value === undefined) {
-        return 1;
-    }
-
-    const trimmed = value.trim();
-    if (trimmed.endsWith('%')) {
-        const percent = clamp(parseFloat(trimmed), 0, 100);
-        return percent / 100;
-    }
-
-    const numeric = Number(trimmed);
-    if (Number.isNaN(numeric)) {
-        return 1;
-    }
-
-    return clamp(numeric, 0, 1);
 }
 
 function tailwindString(color: vscode.Color): string {
@@ -1327,21 +1087,6 @@ function formatColorByFormat(color: vscode.Color, format: ColorFormat): string |
         default:
             return undefined;
     }
-}
-
-function getFormatPriority(original: ColorFormat): ColorFormat[] {
-    const priorityMap: Record<ColorFormat, ColorFormat[]> = {
-        hex: ['hex', 'rgba', 'rgb', 'hexAlpha', 'hsl', 'hsla', 'tailwind'],
-        hexAlpha: ['hexAlpha', 'rgba', 'hex', 'hsla', 'hsl', 'tailwind'],
-        rgb: ['rgb', 'rgba', 'hex', 'hexAlpha', 'hsl', 'hsla', 'tailwind'],
-        rgba: ['rgba', 'hexAlpha', 'hex', 'hsla', 'hsl', 'tailwind'],
-        hsl: ['hsl', 'hsla', 'rgba', 'hex', 'hexAlpha', 'tailwind'],
-        hsla: ['hsla', 'rgba', 'hexAlpha', 'hex', 'tailwind', 'hsl'],
-        tailwind: ['tailwind', 'hsla', 'hsl', 'rgba', 'hexAlpha', 'hex']
-    };
-
-    const order = priorityMap[original] ?? ['rgba', 'hex'];
-    return Array.from(new Set(order));
 }
 
 function registerLanguageProviders(context: vscode.ExtensionContext) {
@@ -1438,7 +1183,7 @@ function extractWorkspaceColorPalette(): Map<string, vscode.Color> {
         
         for (const decl of declarations) {
             const resolved = resolveNestedVariables(decl.value);
-            const parsed = parseColor(resolved);
+            const parsed = colorParser.parseColor(resolved);
             if (parsed) {
                 palette.set(parsed.cssString, parsed.vscodeColor);
             }
@@ -1450,8 +1195,7 @@ function extractWorkspaceColorPalette(): Map<string, vscode.Color> {
 
 // Export selected internals for targeted unit tests.
 export const __testing = {
-    parseColor,
-    getFormatPriority,
+    colorParser,
     formatColorByFormat,
     collectColorData,
     provideDocumentColors,
