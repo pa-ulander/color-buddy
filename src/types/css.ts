@@ -55,6 +55,9 @@ export interface CSSClassColorDeclaration {
     
     /** Property value (can be a literal color or CSS variable) */
     value: string;
+
+    /** Resolved color value after variable expansion (if available) */
+    resolvedValue?: string;
     
     /** URI of the file where class is declared */
     uri: vscode.Uri;
