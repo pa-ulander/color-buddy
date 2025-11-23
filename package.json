@@ -52,6 +52,10 @@
       {
         "command": "colorbuddy.showColorPalette",
         "title": "ColorBuddy: Show Workspace Color Palette"
+      },
+      {
+        "command": "colorbuddy.exportPerformanceLogs",
+        "title": "ColorBuddy: Export Performance Logs"
       }
     ],
     "configuration": {
