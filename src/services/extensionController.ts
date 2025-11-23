@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { ColorData } from '../types';
+import type { ColorData, ColorFormat } from '../types';
 import { DEFAULT_LANGUAGES } from '../types';
 import {
 	MAX_CSS_FILES,
@@ -8,6 +8,7 @@ import {
 	COLOR_SWATCH_SIZE,
 	COLOR_SWATCH_MARGIN,
 	COLOR_SWATCH_BORDER,
+	COLOR_SWATCH_CONTENT,
 	LOG_PREFIX
 } from '../utils/constants';
 import { perfLogger } from '../utils/performanceLogger';
@@ -20,6 +21,20 @@ import { ColorFormatter } from './colorFormatter';
 import { ColorDetector } from './colorDetector';
 import { CSSParser } from './cssParser';
 import { Provider } from './provider';
+
+const CSS_LIKE_LANGUAGES = new Set([
+	'css',
+	'scss',
+	'sass',
+	'less',
+	'stylus'
+]);
+
+const NATIVE_COLOR_PROVIDER_LANGUAGES = new Set([
+	'css',
+	'scss',
+	'less'
+]);
 
 /**
  * Main extension controller managing lifecycle and coordination between services.
@@ -37,6 +52,7 @@ export class ExtensionController implements vscode.Disposable {
 	private readonly disposables: vscode.Disposable[] = [];
 	private cssFileWatcher: vscode.FileSystemWatcher | null = null;
 	private registeredLanguageKey: string | null = null;
+	private indexedCssDocuments: Map<string, number> = new Map();
 
 	constructor(private readonly context: vscode.ExtensionContext) {
 		// Initialize services with dependency injection
@@ -316,12 +332,32 @@ export class ExtensionController implements vscode.Disposable {
 			}
 		});
 
+		// Register color provider for literal colors only (hex, rgb, hsl)
+		// This enables VS Code's native color picker for those values
+		// We don't include CSS variables or classes here - those only show in hover tooltips
 		const colorProvider = vscode.languages.registerColorProvider(selector, {
 			provideDocumentColors: async (document) => {
 				if (this.stateManager.isDocumentProbing(document.uri)) {
 					return [];
 				}
+
 				const colorData = await this.ensureColorData(document);
+
+				let allowedFormats: Set<ColorFormat> | undefined;
+				if (NATIVE_COLOR_PROVIDER_LANGUAGES.has(document.languageId)) {
+					allowedFormats = new Set<ColorFormat>(['tailwind']);
+				} else if (document.languageId === 'sass') {
+					allowedFormats = new Set<ColorFormat>(['tailwind', 'hsl', 'hsla']);
+				}
+
+				if (allowedFormats) {
+					const colors = this.provider.provideDocumentColors(colorData, { allowedFormats });
+					if (colors.length === 0) {
+						perfLogger.log('No document colors emitted after format filtering', document.uri.fsPath);
+					}
+					return colors;
+				}
+
 				return this.provider.provideDocumentColors(colorData);
 			},
 			provideColorPresentations: (color, context) => {
@@ -356,8 +392,23 @@ export class ExtensionController implements vscode.Disposable {
 	 * Refresh a single editor's color decorations.
 	 */
 	private async refreshEditor(editor: vscode.TextEditor): Promise<void> {
+		const editorKey = this.getEditorKey(editor);
+		perfLogger.log('refreshEditor called for', editor.document.uri.fsPath);
+
+		// Skip if a refresh is already pending for this editor (debounce duplicate events)
+		if (this.stateManager.isRefreshPending(editorKey)) {
+			perfLogger.log('Skipping duplicate refresh for editor', editor.document.uri.fsPath);
+			return;
+		}
+
+		// Mark refresh as pending IMMEDIATELY to prevent race conditions
+		perfLogger.log('Marking refresh as pending for', editor.document.uri.fsPath);
+		this.stateManager.markRefreshPending(editorKey);
+
 		if (!this.shouldDecorate(editor.document)) {
 			this.clearDecorationsForEditor(editor);
+			// Clean up pending marker even if we're not decorating
+			this.stateManager.clearOldPendingRefreshes();
 			return;
 		}
 
@@ -367,6 +418,9 @@ export class ExtensionController implements vscode.Disposable {
 		} catch (error) {
 			console.error(`${LOG_PREFIX} failed to refresh color data`, error);
 		}
+
+		// Clean up old pending refresh markers periodically
+		this.stateManager.clearOldPendingRefreshes();
 	}
 
 	/**
@@ -402,6 +456,8 @@ export class ExtensionController implements vscode.Disposable {
 			return [];
 		}
 
+		await this.ensureDocumentIndexed(document);
+
 		const cached = this.cache.get(document.uri.toString(), document.version);
 		if (cached) {
 			perfLogger.log('Cache hit for document', document.uri.fsPath);
@@ -426,48 +482,34 @@ export class ExtensionController implements vscode.Disposable {
 	private async computeColorData(document: vscode.TextDocument): Promise<ColorData[]> {
 		const text = document.getText();
 		const allColorData = this.colorDetector.collectColorData(document, text);
-		const nativeRanges = await this.getNativeColorRangeKeys(document);
 
-		if (nativeRanges.size === 0) {
-			return allColorData;
-		}
+		perfLogger.log('computeColorData', {
+			path: document.uri.fsPath,
+			allColors: allColorData.length
+		});
 
-		return allColorData.filter(data => !nativeRanges.has(this.rangeKey(data.range)));
+		// No need to filter native colors since we only decorate CSS variables and classes,
+		// which the native color provider doesn't handle (it only handles literal hex/rgb/hsl)
+		return allColorData;
 	}
 
-	/**
-	 * Get native color provider ranges to avoid duplicates.
-	 */
-	private async getNativeColorRangeKeys(document: vscode.TextDocument): Promise<Set<string>> {
-		if (this.stateManager.isDocumentProbing(document.uri)) {
-			return new Set();
+	private async ensureDocumentIndexed(document: vscode.TextDocument): Promise<void> {
+		if (!CSS_LIKE_LANGUAGES.has(document.languageId)) {
+			return;
 		}
 
-		this.stateManager.startNativeColorProbe(document.uri);
+		const key = document.uri.toString();
+		const lastVersion = this.indexedCssDocuments.get(key);
+		if (lastVersion === document.version) {
+			return;
+		}
+
 		try {
-			const colorInfos = await vscode.commands.executeCommand<vscode.ColorInformation[] | undefined>(
-				'vscode.executeDocumentColorProvider',
-				document.uri
-			);
-
-			if (!Array.isArray(colorInfos) || colorInfos.length === 0) {
-				return new Set();
-			}
-
-			return new Set(colorInfos.map(info => this.rangeKey(info.range)));
+			await this.cssParser.parseCSSFile(document);
+			this.indexedCssDocuments.set(key, document.version);
 		} catch (error) {
-			console.warn(`${LOG_PREFIX} native color provider probe failed`, error);
-			return new Set();
-		} finally {
-			this.stateManager.finishNativeColorProbe(document.uri);
+			console.error(`${LOG_PREFIX} failed to index inline CSS document ${document.uri.fsPath}`, error);
 		}
-	}
-
-	/**
-	 * Create a unique key for a range.
-	 */
-	private rangeKey(range: vscode.Range): string {
-		return `${range.start.line}:${range.start.character}-${range.end.line}:${range.end.character}`;
 	}
 
 	/**
@@ -486,7 +528,15 @@ export class ExtensionController implements vscode.Disposable {
 		const colorsByRange = new Map<string, string>();
 
 		for (const data of colorData) {
-			if ((data.isCssVariable && !data.isWrappedInFunction) || data.isCssClass) {
+			if ((data.isCssVariable && !data.isWrappedInFunction && !data.isCssVariableDeclaration) || data.isCssClass) {
+				perfLogger.log('Adding decoration for', {
+					text: data.originalText,
+					line: data.range.start.line,
+					isCssVariable: data.isCssVariable,
+					isCssClass: data.isCssClass,
+					variableName: data.variableName,
+					className: data.cssClassName
+				});
 				decorationRanges.push(data.range);
 				const rangeKey = `${data.range.start.line}:${data.range.start.character}`;
 				colorsByRange.set(rangeKey, data.normalizedColor);
@@ -500,7 +550,7 @@ export class ExtensionController implements vscode.Disposable {
 
 		const decoration = vscode.window.createTextEditorDecorationType({
 			before: {
-				contentText: '',
+				contentText: COLOR_SWATCH_CONTENT,
 				border: COLOR_SWATCH_BORDER,
 				width: `${COLOR_SWATCH_SIZE}px`,
 				height: `${COLOR_SWATCH_SIZE}px`,
@@ -516,6 +566,7 @@ export class ExtensionController implements vscode.Disposable {
 				range,
 				renderOptions: color ? {
 					before: {
+						contentText: COLOR_SWATCH_CONTENT,
 						backgroundColor: color,
 						border: COLOR_SWATCH_BORDER,
 						width: `${COLOR_SWATCH_SIZE}px`,
