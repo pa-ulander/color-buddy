@@ -107,6 +107,11 @@
             "sql",
             "graphql"
           ]
+        },
+        "colorbuddy.enablePerformanceLogging": {
+          "type": "boolean",
+          "description": "Enable detailed performance logging for diagnostics. Logs timing information for indexing, caching, and hover operations to the Output panel.",
+          "default": false
         }
       }
     }
