@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const assert = __importStar(require("assert"));
 const vscode = __importStar(require("vscode"));
 const extension_1 = require("../extension");
+const helpers_1 = require("./helpers");
 const { parseColor, getFormatPriority, formatColorByFormat, provideDocumentColors, computeColorData, ensureColorData, registerLanguageProviders, colorDataCache, pendingColorComputations } = extension_1.__testing;
 function assertClose(actual, expected, epsilon = 0.01) {
     assert.ok(Math.abs(actual - expected) <= epsilon, `Expected ${actual} to be within ${epsilon} of ${expected}`);
@@ -43,9 +44,9 @@ function assertClose(actual, expected, epsilon = 0.01) {
 suite('Color parsing', () => {
     test('hex colors normalize to rgb and keep hex priority', () => {
         const parsed = parseColor('#ff0000');
-        assert.ok(parsed, 'Expected hex color to parse');
-        assert.strictEqual(parsed?.cssString, 'rgb(255, 0, 0)');
-        assert.strictEqual(parsed?.formatPriority[0], 'hex');
+        (0, helpers_1.assertDefined)(parsed, 'Expected hex color to parse');
+        assert.strictEqual(parsed.cssString, 'rgb(255, 0, 0)');
+        assert.strictEqual(parsed.formatPriority[0], 'hex');
         assertClose(parsed.vscodeColor.red, 1);
         assertClose(parsed.vscodeColor.green, 0);
         assertClose(parsed.vscodeColor.blue, 0);
@@ -53,8 +54,8 @@ suite('Color parsing', () => {
     });
     test('tailwind compact HSL preserves alpha and priority', () => {
         const parsed = parseColor('200 50% 40% / 0.25');
-        assert.ok(parsed, 'Expected Tailwind color to parse');
-        assert.strictEqual(parsed?.formatPriority[0], 'tailwind');
+        (0, helpers_1.assertDefined)(parsed, 'Expected Tailwind color to parse');
+        assert.strictEqual(parsed.formatPriority[0], 'tailwind');
         assertClose(parsed.vscodeColor.alpha, 0.25);
     });
 });
@@ -78,7 +79,7 @@ suite('Format helpers', () => {
 });
 suite('Integration pipeline', () => {
     test('provideDocumentColors discovers multiple formats in one document', async () => {
-        const document = createMockDocument(`
+        const document = (0, helpers_1.createMockDocument)(`
 			body {
 				color: #f00;
 				background: rgb(0, 128, 255);
@@ -91,7 +92,7 @@ suite('Integration pipeline', () => {
         const restoreConfig = stubWorkspaceLanguages(['plaintext']);
         try {
             const colors = await provideDocumentColors(document);
-            assert.strictEqual(colors.length, 3, 'expected one color per format');
+            (0, helpers_1.assertLength)(colors, 3);
             const texts = colors.map(info => document.getText(info.range));
             assert.ok(texts.includes('#f00'));
             assert.ok(texts.includes('rgb(0, 128, 255)'));
@@ -105,7 +106,7 @@ suite('Integration pipeline', () => {
 });
 suite('Native provider guard', () => {
     test('computeColorData filters ranges claimed by native providers', async () => {
-        const document = createMockDocument('#112233\n#445566', 'plaintext');
+        const document = (0, helpers_1.createMockDocument)('#112233\n#445566', 'plaintext');
         colorDataCache.clear();
         pendingColorComputations.clear();
         const firstRange = new vscode.Range(document.positionAt(0), document.positionAt(7));
@@ -114,7 +115,7 @@ suite('Native provider guard', () => {
         const restoreConfig = stubWorkspaceLanguages(['plaintext']);
         try {
             const data = await computeColorData(document);
-            assert.strictEqual(data.length, 1, 'expected non-native colors to remain');
+            (0, helpers_1.assertLength)(data, 1);
             assert.strictEqual(document.getText(data[0].range), '#445566');
         }
         finally {
@@ -197,8 +198,8 @@ suite('Additional format coverage', () => {
 suite('Cache behaviour', () => {
     test('ensureColorData caches per document version', async () => {
         const uri = vscode.Uri.parse('untitled:cache-test');
-        const docV1 = createMockDocument('#abc', 'plaintext', 1, uri);
-        const docV2 = createMockDocument('#abc\n#def', 'plaintext', 2, uri);
+        const docV1 = createMockDocumentWithVersion('#abc', 'plaintext', 1, uri);
+        const docV2 = createMockDocumentWithVersion('#abc\n#def', 'plaintext', 2, uri);
         colorDataCache.clear();
         pendingColorComputations.clear();
         const restoreCommand = stubExecuteCommand(undefined);
@@ -209,10 +210,10 @@ suite('Cache behaviour', () => {
             assert.strictEqual(second, first, 'expected cached array for unchanged version');
             const third = await ensureColorData(docV2);
             assert.notStrictEqual(third, first, 'expected recompute on version bump');
-            assert.strictEqual(third.length, 2);
+            (0, helpers_1.assertLength)(third, 2);
             const cacheEntry = colorDataCache.get(uri.toString());
-            assert.ok(cacheEntry);
-            assert.strictEqual(cacheEntry?.version, 2);
+            (0, helpers_1.assertDefined)(cacheEntry);
+            assert.strictEqual(cacheEntry.version, 2);
         }
         finally {
             restoreCommand();
@@ -245,7 +246,10 @@ function stubWorkspaceLanguages(languages) {
         vscode.workspace.getConfiguration = original;
     };
 }
-function createMockDocument(content, languageId, version = 1, uri = vscode.Uri.parse(`untitled:${Math.random().toString(36).slice(2)}`)) {
+/**
+ * Helper for cache test that needs versioned mock documents
+ */
+function createMockDocumentWithVersion(content, languageId, version = 1, uri = vscode.Uri.parse(`untitled:${Math.random().toString(36).slice(2)}`)) {
     const text = content.replace(/^\n/, '');
     const lines = text.split(/\r?\n/);
     const positionAt = (index) => {
