@@ -4,6 +4,7 @@ import { ColorFormatter } from './colorFormatter';
 import { CSSParser } from './cssParser';
 import { Registry } from './registry';
 import { t, LocalizedStrings } from '../l10n/localization';
+import type { ColorFormat } from '../types';
 
 /**
  * Provider service for VS Code language providers (hover, color provider).
@@ -286,11 +287,19 @@ export class Provider {
     /**
      * Provide document colors for VS Code color picker
      */
-    provideDocumentColors(colorData: any[]): vscode.ColorInformation[] {
+    provideDocumentColors(colorData: any[], options?: { allowedFormats?: Set<ColorFormat> }): vscode.ColorInformation[] {
         try {
+            const allowedFormats = options?.allowedFormats;
+
             // Exclude CSS variables and CSS classes from the color picker - they're shown in hover tooltips only
             return colorData
                 .filter(data => !data.isCssVariable && !data.isCssClass)
+                .filter(data => {
+                    if (!allowedFormats) {
+                        return true;
+                    }
+                    return data.format && allowedFormats.has(data.format);
+                })
                 .map(data => new vscode.ColorInformation(data.range, data.vscodeColor));
         } catch (error) {
             console.error('[ColorBuddy] Provider: failed to provide document colors', error);
