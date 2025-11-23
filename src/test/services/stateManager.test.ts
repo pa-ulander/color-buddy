@@ -138,20 +138,42 @@ suite('StateManager Service', () => {
         });
     });
 
-    suite('Probing Flag', () => {
-        test('isProbingNativeColors defaults to false', () => {
+    suite('Native color probing', () => {
+        const uri = vscode.Uri.parse('file:///test.css');
+
+        test('no documents probing by default', () => {
             assert.strictEqual(stateManager.isProbingNativeColors, false);
+            assert.strictEqual(stateManager.isDocumentProbing(uri), false);
         });
 
-        test('isProbingNativeColors can be set to true', () => {
-            stateManager.isProbingNativeColors = true;
+        test('startNativeColorProbe tracks document', () => {
+            stateManager.startNativeColorProbe(uri);
             assert.strictEqual(stateManager.isProbingNativeColors, true);
+            assert.strictEqual(stateManager.isDocumentProbing(uri), true);
         });
 
-        test('isProbingNativeColors can be set to false', () => {
-            stateManager.isProbingNativeColors = true;
-            stateManager.isProbingNativeColors = false;
+        test('finishNativeColorProbe removes tracking', () => {
+            stateManager.startNativeColorProbe(uri);
+            stateManager.finishNativeColorProbe(uri);
             assert.strictEqual(stateManager.isProbingNativeColors, false);
+            assert.strictEqual(stateManager.isDocumentProbing(uri), false);
+        });
+    });
+
+    suite('Configuration cache', () => {
+        test('defaults to undefined', () => {
+            assert.strictEqual(stateManager.getCachedLanguages(), undefined);
+        });
+
+        test('setCachedLanguages stores value', () => {
+            stateManager.setCachedLanguages(['css']);
+            assert.deepStrictEqual(stateManager.getCachedLanguages(), ['css']);
+        });
+
+        test('clearLanguageCache removes cached value', () => {
+            stateManager.setCachedLanguages(['css']);
+            stateManager.clearLanguageCache();
+            assert.strictEqual(stateManager.getCachedLanguages(), undefined);
         });
     });
 
@@ -194,7 +216,8 @@ suite('StateManager Service', () => {
             stateManager.setDecoration('editor-1', decoration1);
             stateManager.setDecoration('editor-2', decoration2);
             stateManager.addProviderSubscription(sub1);
-            stateManager.isProbingNativeColors = true;
+            const uri = vscode.Uri.parse('file:///integration.css');
+            stateManager.startNativeColorProbe(uri);
 
             assert.strictEqual(stateManager.decorationCount, 2);
             assert.strictEqual(stateManager.subscriptionCount, 1);
