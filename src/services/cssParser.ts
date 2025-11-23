@@ -18,21 +18,30 @@ export class CSSParser {
      */
     async parseCSSFile(document: vscode.TextDocument): Promise<void> {
         const text = document.getText();
-        
-        // Extract CSS variables
-        this.extractCSSVariables(document, text);
-        
-        // Extract CSS class colors
-        this.extractCSSClassColors(document, text);
+
+        // Remove existing declarations for this document so we can re-build a fresh snapshot.
+        this.registry.removeByUri(document.uri);
+
+        const { declarations: variableDeclarations, lookup: localVariables } = this.extractCSSVariables(document, text);
+
+        this.registry.replaceVariablesForUri(document.uri, variableDeclarations);
+
+        const classDeclarations = this.extractCSSClassColors(document, text, localVariables);
+        this.registry.replaceClassesForUri(document.uri, classDeclarations);
     }
 
     /**
      * Extract CSS custom properties (variables) from text.
      * Matches patterns like: --variable-name: value;
      */
-    private extractCSSVariables(document: vscode.TextDocument, text: string): void {
+    private extractCSSVariables(
+        document: vscode.TextDocument,
+        text: string
+    ): { declarations: CSSVariableDeclaration[]; lookup: Map<string, CSSVariableDeclaration[]> } {
         const cssVarRegex = /(--[\w-]+)\s*:\s*([^;]+);/g;
         let match: RegExpExecArray | null;
+        const declarations: CSSVariableDeclaration[] = [];
+        const lookup = new Map<string, CSSVariableDeclaration[]>();
 
         while ((match = cssVarRegex.exec(text)) !== null) {
             const varName = match[1];
@@ -52,35 +61,53 @@ export class CSSParser {
                 context: context
             };
 
-            // Add to registry
-            this.registry.addVariable(varName, declaration);
+            declarations.push(declaration);
+            const existing = lookup.get(varName) ?? [];
+            existing.push(declaration);
+            lookup.set(varName, existing);
         }
+
+        for (const declarationsForVar of lookup.values()) {
+            declarationsForVar.sort((a, b) => a.context.specificity - b.context.specificity);
+        }
+
+        for (const declaration of declarations) {
+            declaration.resolvedValue = this.resolveNestedVariables(declaration.value, {
+                localVariables: lookup,
+                visited: new Set([declaration.name])
+            });
+        }
+
+        return { declarations, lookup };
     }
 
     /**
      * Extract CSS class color properties from text.
      * Matches patterns like: .className { color: value; }
      */
-    private extractCSSClassColors(document: vscode.TextDocument, text: string): void {
+    private extractCSSClassColors(
+        document: vscode.TextDocument,
+        text: string,
+        localVariables: Map<string, CSSVariableDeclaration[]>
+    ): CSSClassColorDeclaration[] {
         const colorPropertyRegex = /\.([\.\w-]+)\s*\{[^}]*?(color|background-color|border-color|background)\s*:\s*([^;]+);/g;
         let colorMatch: RegExpExecArray | null;
+        const declarations: CSSClassColorDeclaration[] = [];
         
         while ((colorMatch = colorPropertyRegex.exec(text)) !== null) {
             const className = colorMatch[1];
             const property = colorMatch[2];
-            const value = colorMatch[3].trim();
-            
+            const rawValue = colorMatch[3].trim();
+
             // Try to resolve if it's a color value or CSS variable reference
-            let resolvedValue = value;
-            const varMatch = value.match(/var\(\s*(--[\w-]+)\s*\)/);
+            let resolvedValue = rawValue;
+            const varMatch = rawValue.match(/var\(\s*(--[\w-]+)\s*\)/);
             if (varMatch) {
-                const varName = varMatch[1];
-                const varDeclarations = this.registry.getVariable(varName);
-                if (varDeclarations && varDeclarations.length > 0) {
-                    resolvedValue = this.resolveNestedVariables(varDeclarations[0].value);
-                }
+                resolvedValue = this.resolveNestedVariables(rawValue, {
+                    localVariables
+                });
             }
-            
+
             // Check if the value is a color
             const parsed = this.colorParser.parseColor(resolvedValue);
             if (parsed) {
@@ -90,15 +117,18 @@ export class CSSParser {
                 const declaration: CSSClassColorDeclaration = {
                     className: className,
                     property: property,
-                    value: resolvedValue,
+                    value: rawValue,
                     uri: document.uri,
                     line: position.line,
-                    selector: selector
+                    selector: selector,
+                    resolvedValue: parsed.cssString
                 };
                 
-                this.registry.addClass(className, declaration);
+                declarations.push(declaration);
             }
         }
+
+        return declarations;
     }
 
     /**
@@ -186,13 +216,18 @@ export class CSSParser {
      * Includes circular reference detection.
      */
     resolveNestedVariables(
-        value: string, 
-        visitedVars: Set<string> = new Set()
+        value: string,
+        options: {
+            localVariables?: Map<string, CSSVariableDeclaration[]>;
+            visited?: Set<string>;
+        } = {}
     ): string {
         const varPattern = /var\(\s*(--[\w-]+)\s*\)/g;
         let match: RegExpExecArray | null;
         let resolvedValue = value;
-        
+        const visitedVars = options.visited ?? new Set<string>();
+        const localVariables = options.localVariables;
+
         while ((match = varPattern.exec(value)) !== null) {
             const nestedVarName = match[1];
             
@@ -203,23 +238,40 @@ export class CSSParser {
             }
             
             // Look up the nested variable
-            const nestedDeclarations = this.registry.getVariable(nestedVarName);
-            if (!nestedDeclarations || nestedDeclarations.length === 0) {
+            const nestedDeclaration = this.getPreferredDeclaration(nestedVarName, localVariables);
+            if (!nestedDeclaration) {
                 continue; // Keep the var() reference if not found
             }
-            
-            // Get the first declaration (highest priority)
-            const nestedDecl = nestedDeclarations[0];
             
             // Mark as visited and recurse
             const newVisited = new Set(visitedVars);
             newVisited.add(nestedVarName);
-            const nestedResolved = this.resolveNestedVariables(nestedDecl.value, newVisited);
+            const nestedResolved = this.resolveNestedVariables(nestedDeclaration.value, {
+                localVariables,
+                visited: newVisited
+            });
             
             // Replace this var() with the resolved value
             resolvedValue = resolvedValue.replace(match[0], nestedResolved);
         }
         
         return resolvedValue;
+    }
+
+    private getPreferredDeclaration(
+        name: string,
+        localVariables?: Map<string, CSSVariableDeclaration[]>
+    ): CSSVariableDeclaration | undefined {
+        const local = localVariables?.get(name);
+        if (local && local.length > 0) {
+            return local[0];
+        }
+
+        const registryDeclarations = this.registry.getVariablesSorted(name);
+        if (registryDeclarations.length > 0) {
+            return registryDeclarations[0];
+        }
+
+        return undefined;
     }
 }
