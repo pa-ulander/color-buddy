@@ -8,7 +8,6 @@
     "type": "git",
     "url": "https://github.com/pa-ulander/color-buddy"
   },
-
   "keywords": [
     "color",
     "colors",
@@ -137,5 +136,8 @@
     "typescript-eslint": "^8.46.3",
     "webpack": "^5.102.1",
     "webpack-cli": "^6.0.1"
+  },
+  "dependencies": {
+    "vscode-nls": "^5.2.0"
   }
 }
