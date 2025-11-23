@@ -10,7 +10,7 @@ import {
 const {
 	colorParser,
 	colorFormatter,
-	provideDocumentColors,
+	provider,
 	computeColorData,
 	ensureColorData,
 	registerLanguageProviders,
@@ -75,9 +75,10 @@ suite('Integration pipeline', () => {
 		const restoreCommand = stubExecuteCommand(undefined);
 		const restoreConfig = stubWorkspaceLanguages(['plaintext']);
 		try {
-			const colors = await provideDocumentColors(document);
+			const colorData = await ensureColorData(document);
+			const colors = provider.provideDocumentColors(colorData);
 			assertLength(colors, 3);
-			const texts = colors.map(info => document.getText(info.range));
+			const texts = colors.map((info: any) => document.getText(info.range));
 			assert.ok(texts.includes('#f00'));
 			assert.ok(texts.includes('rgb(0, 128, 255)'));
 			assert.ok(texts.includes('200 50% 40% / 0.3'));
