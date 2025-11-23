@@ -133,7 +133,8 @@ export class ExtensionController implements vscode.Disposable {
 	private registerCommands(): void {
 		const commands = [
 			vscode.commands.registerCommand('colorbuddy.reindexCSSFiles', () => this.handleReindexCommand()),
-			vscode.commands.registerCommand('colorbuddy.showColorPalette', () => this.handleShowPaletteCommand())
+			vscode.commands.registerCommand('colorbuddy.showColorPalette', () => this.handleShowPaletteCommand()),
+			vscode.commands.registerCommand('colorbuddy.exportPerformanceLogs', () => this.handleExportLogsCommand())
 		];
 
 		this.context.subscriptions.push(...commands);
@@ -182,15 +183,78 @@ export class ExtensionController implements vscode.Disposable {
 	}
 
 	/**
+	 * Handle export performance logs command.
+	 */
+	private async handleExportLogsCommand(): Promise<void> {
+		if (!perfLogger.isEnabled()) {
+			const enable = await vscode.window.showWarningMessage(
+				'Performance logging is currently disabled. Enable it to start collecting logs.',
+				'Enable Logging',
+				'Cancel'
+			);
+			if (enable === 'Enable Logging') {
+				const config = vscode.workspace.getConfiguration('colorbuddy');
+				await config.update('enablePerformanceLogging', true, vscode.ConfigurationTarget.Global);
+				perfLogger.updateEnabled();
+				await vscode.window.showInformationMessage(
+					'Performance logging enabled. Use the extension normally, then run this command again to export logs.'
+				);
+			}
+			return;
+		}
+
+		const logContent = perfLogger.exportLogs();
+		
+		// Create a new untitled document with the logs
+		const doc = await vscode.workspace.openTextDocument({
+			content: logContent,
+			language: 'plaintext'
+		});
+		
+		await vscode.window.showTextDocument(doc);
+		await vscode.window.showInformationMessage(
+			'Performance logs exported. Save this file to share or analyze the logs.'
+		);
+	}
+
+	/**
 	 * Register document and editor event handlers.
 	 */
 	private registerEventHandlers(): void {
 		this.context.subscriptions.push(
 			vscode.window.onDidChangeActiveTextEditor(editor => {
+				perfLogger.log('Active editor changed', editor?.document.uri.fsPath || 'none');
+				// Update visibility tracking
 				if (editor) {
+					const editorKey = this.getEditorKey(editor);
+					this.stateManager.markEditorVisible(editorKey);
+					perfLogger.log('Decoration exists for editor', this.stateManager.getDecoration(editorKey) !== undefined);
 					this.refreshEditor(editor).catch(error => {
 						console.error(`${LOG_PREFIX} failed to refresh active editor`, error);
 					});
+				}
+			}),
+			// Track when editors become visible/hidden
+			vscode.window.onDidChangeVisibleTextEditors(editors => {
+				perfLogger.log('Visible editors changed', editors.length);
+				const currentVisible = new Set(editors.map(e => this.getEditorKey(e)));
+				// Mark newly visible editors
+				for (const editor of editors) {
+					const editorKey = this.getEditorKey(editor);
+					if (!this.stateManager.isEditorVisible(editorKey)) {
+						perfLogger.log('Editor became visible, refreshing', editor.document.uri.fsPath);
+						this.stateManager.markEditorVisible(editorKey);
+						this.refreshEditor(editor).catch(error => {
+							console.error(`${LOG_PREFIX} failed to refresh newly visible editor`, error);
+						});
+					}
+				}
+				// Mark hidden editors
+				for (const visibleKey of this.stateManager.getVisibleEditors()) {
+					if (!currentVisible.has(visibleKey)) {
+						perfLogger.log('Editor became hidden', visibleKey);
+						this.stateManager.markEditorHidden(visibleKey);
+					}
 				}
 			}),
 			vscode.workspace.onDidChangeTextDocument(event => {
@@ -410,9 +474,11 @@ export class ExtensionController implements vscode.Disposable {
 	 * Apply CSS variable decorations to an editor.
 	 */
 	private applyCSSVariableDecorations(editor: vscode.TextEditor, colorData: ColorData[]): void {
+		perfLogger.start('applyCSSVariableDecorations');
 		const editorKey = this.getEditorKey(editor);
 		const existingDecoration = this.stateManager.getDecoration(editorKey);
 		if (existingDecoration) {
+			perfLogger.log('Disposing existing decoration for editor', editor.document.uri.fsPath);
 			existingDecoration.dispose();
 		}
 
@@ -461,9 +527,16 @@ export class ExtensionController implements vscode.Disposable {
 		}).filter(item => item.renderOptions);
 
 		if (decorationRangesWithOptions.length > 0) {
+			perfLogger.log('Applying decorations to editor', {
+				path: editor.document.uri.fsPath,
+				count: decorationRangesWithOptions.length
+			});
 			editor.setDecorations(decoration, decorationRangesWithOptions);
 			this.stateManager.setDecoration(editorKey, decoration);
+		} else {
+			perfLogger.log('No decorations to apply for editor', editor.document.uri.fsPath);
 		}
+		perfLogger.end('applyCSSVariableDecorations');
 	}
 
 	/**
