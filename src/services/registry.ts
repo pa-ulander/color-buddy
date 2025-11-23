@@ -24,9 +24,9 @@ export class Registry {
      * Add a CSS variable declaration
      */
     addVariable(name: string, declaration: CSSVariableDeclaration): void {
-        const existing = this.cssVariables.get(name) || [];
-        existing.push(declaration);
-        this.cssVariables.set(name, existing);
+        const existing = this.cssVariables.get(name) ?? [];
+        const updated = [...existing, declaration].sort((a, b) => a.context.specificity - b.context.specificity);
+        this.cssVariables.set(name, updated);
     }
 
     /**
@@ -44,7 +44,7 @@ export class Registry {
         if (!declarations || declarations.length === 0) {
             return [];
         }
-        return [...declarations].sort((a, b) => a.context.specificity - b.context.specificity);
+        return [...declarations];
     }
 
     /**
@@ -74,27 +74,8 @@ export class Registry {
      * Remove all declarations from a specific file URI
      */
     removeByUri(uri: vscode.Uri): void {
-        const uriString = uri.toString();
-
-        // Remove variables from this URI
-        for (const [name, declarations] of this.cssVariables.entries()) {
-            const filtered = declarations.filter(decl => decl.uri.toString() !== uriString);
-            if (filtered.length === 0) {
-                this.cssVariables.delete(name);
-            } else if (filtered.length !== declarations.length) {
-                this.cssVariables.set(name, filtered);
-            }
-        }
-
-        // Remove classes from this URI
-        for (const [name, declarations] of this.cssClasses.entries()) {
-            const filtered = declarations.filter(decl => decl.uri.toString() !== uriString);
-            if (filtered.length === 0) {
-                this.cssClasses.delete(name);
-            } else if (filtered.length !== declarations.length) {
-                this.cssClasses.set(name, filtered);
-            }
-        }
+        this.removeVariablesByUri(uri);
+        this.removeClassesByUri(uri);
     }
 
     /**
@@ -145,5 +126,69 @@ export class Registry {
      */
     hasClass(name: string): boolean {
         return this.cssClasses.has(name);
+    }
+
+    /**
+     * Replace all variable declarations for a given URI.
+     * Removes stale declarations before inserting the provided ones.
+     */
+    replaceVariablesForUri(uri: vscode.Uri, declarations: CSSVariableDeclaration[]): void {
+        this.removeVariablesByUri(uri);
+
+        const grouped = new Map<string, CSSVariableDeclaration[]>();
+        for (const declaration of declarations) {
+            const existing = grouped.get(declaration.name) ?? [];
+            existing.push(declaration);
+            grouped.set(declaration.name, existing);
+        }
+
+        for (const [name, decls] of grouped) {
+            const existing = this.cssVariables.get(name) ?? [];
+            const merged = [...existing, ...decls].sort((a, b) => a.context.specificity - b.context.specificity);
+            this.cssVariables.set(name, merged);
+        }
+    }
+
+    /**
+     * Replace all CSS class declarations for a given URI.
+     */
+    replaceClassesForUri(uri: vscode.Uri, declarations: CSSClassColorDeclaration[]): void {
+        this.removeClassesByUri(uri);
+
+        const grouped = new Map<string, CSSClassColorDeclaration[]>();
+        for (const declaration of declarations) {
+            const existing = grouped.get(declaration.className) ?? [];
+            existing.push(declaration);
+            grouped.set(declaration.className, existing);
+        }
+
+        for (const [className, decls] of grouped) {
+            const existing = this.cssClasses.get(className) ?? [];
+            this.cssClasses.set(className, [...existing, ...decls]);
+        }
+    }
+
+    private removeVariablesByUri(uri: vscode.Uri): void {
+        const uriString = uri.toString();
+        for (const [name, declarations] of this.cssVariables.entries()) {
+            const filtered = declarations.filter(decl => decl.uri.toString() !== uriString);
+            if (filtered.length === 0) {
+                this.cssVariables.delete(name);
+            } else if (filtered.length !== declarations.length) {
+                this.cssVariables.set(name, filtered);
+            }
+        }
+    }
+
+    private removeClassesByUri(uri: vscode.Uri): void {
+        const uriString = uri.toString();
+        for (const [name, declarations] of this.cssClasses.entries()) {
+            const filtered = declarations.filter(decl => decl.uri.toString() !== uriString);
+            if (filtered.length === 0) {
+                this.cssClasses.delete(name);
+            } else if (filtered.length !== declarations.length) {
+                this.cssClasses.set(name, filtered);
+            }
+        }
     }
 }
