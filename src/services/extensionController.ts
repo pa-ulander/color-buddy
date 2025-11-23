@@ -10,6 +10,7 @@ import {
 	COLOR_SWATCH_BORDER,
 	LOG_PREFIX
 } from '../utils/constants';
+import { perfLogger } from '../utils/performanceLogger';
 import { t, LocalizedStrings } from '../l10n/localization';
 import { Registry } from './registry';
 import { Cache } from './cache';
@@ -53,6 +54,7 @@ export class ExtensionController implements vscode.Disposable {
 	 * Activate the extension and set up all features.
 	 */
 	async activate(): Promise<void> {
+		perfLogger.start('extension.activate');
 		console.log(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_ACTIVATING)}`);
 
 		this.setupErrorHandlers();
@@ -64,6 +66,8 @@ export class ExtensionController implements vscode.Disposable {
 		this.refreshVisibleEditors();
 
 		console.log(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_ACTIVATED)}`);
+		perfLogger.end('extension.activate');
+		perfLogger.logSummary();
 	}
 
 	/**
@@ -208,6 +212,9 @@ export class ExtensionController implements vscode.Disposable {
 					this.registerLanguageProviders();
 					this.refreshVisibleEditors();
 				}
+				if (event.affectsConfiguration('colorbuddy.enablePerformanceLogging')) {
+					perfLogger.updateEnabled();
+				}
 			})
 		);
 	}
@@ -237,8 +244,11 @@ export class ExtensionController implements vscode.Disposable {
 
 		const hoverProvider = vscode.languages.registerHoverProvider(selector, {
 			provideHover: async (document, position) => {
+				perfLogger.start('provideHover');
 				const colorData = await this.ensureColorData(document);
-				return this.provider.provideHover(colorData, position);
+				const result = await this.provider.provideHover(colorData, position);
+				perfLogger.end('provideHover');
+				return result;
 			}
 		});
 
@@ -330,13 +340,18 @@ export class ExtensionController implements vscode.Disposable {
 
 		const cached = this.cache.get(document.uri.toString(), document.version);
 		if (cached) {
+			perfLogger.log('Cache hit for document', document.uri.fsPath);
 			return cached;
 		}
 
+		perfLogger.log('Cache miss for document', document.uri.fsPath);
 		const key = `${document.uri.toString()}-${document.version}`;
 		return this.cache.getPendingOrCompute(key, async () => {
+			perfLogger.start('computeColorData');
 			const data = await this.computeColorData(document);
 			this.cache.set(document.uri.toString(), document.version, data);
+			perfLogger.log('Colors detected in document', data.length);
+			perfLogger.end('computeColorData');
 			return data;
 		});
 	}
@@ -455,6 +470,7 @@ export class ExtensionController implements vscode.Disposable {
 	 * Index all CSS files in the workspace.
 	 */
 	private async indexWorkspaceCSSFiles(): Promise<void> {
+		perfLogger.start('indexWorkspaceCSSFiles');
 		console.log(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_INDEXING)}`);
 		this.registry.clear();
 
@@ -464,16 +480,24 @@ export class ExtensionController implements vscode.Disposable {
 			MAX_CSS_FILES
 		);
 
+		perfLogger.log('CSS files found', cssFiles.length);
+
 		for (const fileUri of cssFiles) {
 			try {
+				perfLogger.start('parseCSSFile');
 				const document = await vscode.workspace.openTextDocument(fileUri);
 				await this.cssParser.parseCSSFile(document);
+				perfLogger.end('parseCSSFile');
 			} catch (error) {
 				console.error(
 					`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_ERROR_CSS_INDEXING, fileUri.fsPath, String(error))}`
 				);
 			}
 		}
+
+		perfLogger.log('Total CSS variables indexed', this.registry.variableCount);
+		perfLogger.log('Total CSS classes indexed', this.registry.classCount);
+		perfLogger.end('indexWorkspaceCSSFiles');
 	}
 
 	/**
