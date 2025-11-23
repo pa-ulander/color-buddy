@@ -9,7 +9,7 @@ import {
 
 const {
 	colorParser,
-	formatColorByFormat,
+	colorFormatter,
 	provideDocumentColors,
 	computeColorData,
 	ensureColorData,
@@ -54,10 +54,10 @@ suite('Format helpers', () => {
 	test('format helpers respect alpha gating', () => {
 		const opaqueRed = new vscode.Color(1, 0, 0, 1);
 		const translucentRed = new vscode.Color(1, 0, 0, 0.4);
-		assert.strictEqual(formatColorByFormat(opaqueRed, 'hex'), '#ff0000');
-		assert.strictEqual(formatColorByFormat(opaqueRed, 'rgba'), 'rgba(255, 0, 0, 1)');
-		assert.strictEqual(formatColorByFormat(translucentRed, 'hex'), undefined);
-		assert.strictEqual(formatColorByFormat(translucentRed, 'hexAlpha'), '#ff000066');
+		assert.strictEqual(colorFormatter.formatByFormat(opaqueRed, 'hex'), '#ff0000');
+		assert.strictEqual(colorFormatter.formatByFormat(opaqueRed, 'rgba'), 'rgba(255, 0, 0, 1)');
+		assert.strictEqual(colorFormatter.formatByFormat(translucentRed, 'hex'), undefined);
+		assert.strictEqual(colorFormatter.formatByFormat(translucentRed, 'hexAlpha'), '#ff000066');
 	});
 });
 
@@ -168,16 +168,16 @@ suite('Language configuration', () => {
 suite('Additional format coverage', () => {
 	test('format helpers round-trip HSL boundary values', () => {
 		const color = new vscode.Color(0, 1, 0, 0.5);
-		const hsla = formatColorByFormat(color, 'hsla');
+		const hsla = colorFormatter.formatByFormat(color, 'hsla');
 		assert.ok(hsla);
 		assert.match(hsla!, /^hsla\(/);
-		const rgb = formatColorByFormat(color, 'rgba');
+		const rgb = colorFormatter.formatByFormat(color, 'rgba');
 		assert.strictEqual(rgb, 'rgba(0, 255, 0, 0.5)');
 	});
 
 	test('Tailwind formatting matches rgb-only alpha handling', () => {
 		const color = new vscode.Color(1, 0, 1, 0.25);
-		const tailwind = formatColorByFormat(color, 'tailwind');
+		const tailwind = colorFormatter.formatByFormat(color, 'tailwind');
 		assert.ok(tailwind);
 		assert.ok(tailwind?.includes('/ 0.25'));
 	});
