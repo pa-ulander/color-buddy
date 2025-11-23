@@ -144,11 +144,11 @@ class ExtensionController implements vscode.Disposable {
             await this.indexWorkspaceCSSFiles();
             this.refreshVisibleEditors();
             await vscode.window.showInformationMessage(
-                `ColorBuddy: ${t(LocalizedStrings.EXTENSION_INDEXING_COMPLETE, this.registry.variableCount)}`
+                t(LocalizedStrings.EXTENSION_INDEXING_COMPLETE, this.registry.variableCount)
             );
         } catch (error) {
             console.error(`${LOG_PREFIX} failed to re-index CSS files`, error);
-            await vscode.window.showErrorMessage('ColorBuddy: Failed to re-index CSS files');
+            await vscode.window.showErrorMessage(t(LocalizedStrings.EXTENSION_ERROR_REINDEX));
         }
     }
 
