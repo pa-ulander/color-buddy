@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { ColorData, CSSVariableDeclaration } from '../types';
+import type { ColorData } from '../types';
 import type { Registry } from './registry';
 import type { ColorParser } from './colorParser';
 
@@ -9,10 +9,23 @@ import type { ColorParser } from './colorParser';
  * CSS variables, Tailwind classes, and CSS class colors.
  */
 export class ColorDetector {
+    private static readonly HEX_COLOR_REGEX = /#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/g;
+    private static readonly FUNCTION_COLOR_REGEX = /\b(?:rgb|rgba|hsl|hsla)\(([^{\r\n]*?)\)/gi;
+    private static readonly TAILWIND_HSL_REGEX = /(?<![\w#(])([0-9]+(?:\.[0-9]+)?\s+[0-9]+(?:\.[0-9]+)?%\s+[0-9]+(?:\.[0-9]+)?%(?:\s*\/\s*(?:0?\.\d+|1(?:\.0+)?))?)/g;
+    private static readonly CSS_VAR_REGEX = /var\(\s*(--[\w-]+)\s*\)/g;
+    private static readonly CSS_VAR_IN_FUNC_REGEX = /\b(hsl|hsla|rgb|rgba)\(\s*var\(\s*(--[\w-]+)\s*\)\s*\)/gi;
+    private static readonly TAILWIND_CLASS_REGEX = /\b(bg|text|border|ring|shadow|from|via|to|outline|decoration|divide|accent|caret)-(\w+(?:-\w+)?)\b/g;
+    private static readonly CLASS_NAME_REGEX = /class\s*=\s*["']([^"']+)["']/g;
+
     constructor(
         private readonly registry: Registry,
         private readonly colorParser: ColorParser
     ) {}
+
+    private static reset(regex: RegExp): RegExp {
+        regex.lastIndex = 0;
+        return regex;
+    }
 
     /**
      * Collect all color data from a document's text.
@@ -49,14 +62,14 @@ export class ColorDetector {
         };
 
         // Detect hex colors: #rgb, #rrggbb, #rrggbbaa
-        const hexRegex = /#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/g;
+        const hexRegex = ColorDetector.reset(ColorDetector.HEX_COLOR_REGEX);
         let hexMatch: RegExpExecArray | null;
         while ((hexMatch = hexRegex.exec(text)) !== null) {
             pushMatch(hexMatch.index, hexMatch[0]);
         }
 
         // Detect rgb/rgba and hsl/hsla functions
-        const funcRegex = /\b(?:rgb|rgba|hsl|hsla)\(([^\n]*?)\)/gi;
+        const funcRegex = ColorDetector.reset(ColorDetector.FUNCTION_COLOR_REGEX);
         let funcMatch: RegExpExecArray | null;
         while ((funcMatch = funcRegex.exec(text)) !== null) {
             const fullMatch = funcMatch[0];
@@ -64,35 +77,35 @@ export class ColorDetector {
         }
 
         // Detect Tailwind compact HSL: h s% l% / alpha
-        const tailwindRegex = /(?<![\w#(])([0-9]+(?:\.[0-9]+)?\s+[0-9]+(?:\.[0-9]+)?%\s+[0-9]+(?:\.[0-9]+)?%(?:\s*\/\s*(?:0?\.\d+|1(?:\.0+)?))?)/g;
+        const tailwindRegex = ColorDetector.reset(ColorDetector.TAILWIND_HSL_REGEX);
         let tailwindMatch: RegExpExecArray | null;
         while ((tailwindMatch = tailwindRegex.exec(text)) !== null) {
             pushMatch(tailwindMatch.index, tailwindMatch[1]);
         }
 
         // Detect CSS variables: var(--variable-name)
-        const varRegex = /var\(\s*(--[\w-]+)\s*\)/g;
+        const varRegex = ColorDetector.reset(ColorDetector.CSS_VAR_REGEX);
         let varMatch: RegExpExecArray | null;
         while ((varMatch = varRegex.exec(text)) !== null) {
             this.collectCSSVariableReference(document, varMatch.index, varMatch[0], varMatch[1], results, seenRanges);
         }
 
         // Detect CSS variables wrapped in color functions: hsl(var(--variable)), rgb(var(--variable))
-        const varInFuncRegex = /\b(hsl|hsla|rgb|rgba)\(\s*var\(\s*(--[\w-]+)\s*\)\s*\)/gi;
+        const varInFuncRegex = ColorDetector.reset(ColorDetector.CSS_VAR_IN_FUNC_REGEX);
         let varInFuncMatch: RegExpExecArray | null;
         while ((varInFuncMatch = varInFuncRegex.exec(text)) !== null) {
             this.collectCSSVariableReference(document, varInFuncMatch.index, varInFuncMatch[0], varInFuncMatch[2], results, seenRanges, varInFuncMatch[1] as 'hsl' | 'hsla' | 'rgb' | 'rgba');
         }
 
         // Detect Tailwind color classes: bg-primary, text-accent, border-destructive, etc.
-        const tailwindClassRegex = /\b(bg|text|border|ring|shadow|from|via|to|outline|decoration|divide|accent|caret)-(\w+(?:-\w+)?)\b/g;
+        const tailwindClassRegex = ColorDetector.reset(ColorDetector.TAILWIND_CLASS_REGEX);
         let twClassMatch: RegExpExecArray | null;
         while ((twClassMatch = tailwindClassRegex.exec(text)) !== null) {
             this.collectTailwindClass(document, twClassMatch.index, twClassMatch[0], twClassMatch[2], results, seenRanges);
         }
         
         // Detect CSS class names with color properties: plums, bonk, etc.
-        const classNameRegex = /class\s*=\s*["']([^"']+)["']/g;
+        const classNameRegex = ColorDetector.reset(ColorDetector.CLASS_NAME_REGEX);
         let classMatch: RegExpExecArray | null;
         while ((classMatch = classNameRegex.exec(text)) !== null) {
             const classList = classMatch[1].split(/\s+/);
@@ -129,18 +142,14 @@ export class ColorDetector {
         }
 
         // Try to resolve the CSS variable
-        const declarations = this.registry.getVariable(variableName);
-        if (!declarations || declarations.length === 0) {
+        const declarations = this.registry.getVariablesSorted(variableName);
+        if (declarations.length === 0) {
             return;
         }
 
-        // Use the first declaration (prioritize :root context)
-        const declaration = declarations.sort((a: CSSVariableDeclaration, b: CSSVariableDeclaration) => 
-            a.context.specificity - b.context.specificity
-        )[0];
-        
-        // Resolve nested variables recursively
-        let colorValue = this.resolveNestedVariables(declaration.value);
+        const declaration = declarations[0];
+
+        let colorValue = declaration.resolvedValue ?? this.resolveNestedVariables(declaration.value);
 
         // If wrapped in a color function, prepend it
         if (wrappingFunction) {
@@ -191,19 +200,15 @@ export class ColorDetector {
         }
 
         // Try to resolve the CSS variable
-        const declarations = this.registry.getVariable(variableName);
-        if (!declarations || declarations.length === 0) {
+        const declarations = this.registry.getVariablesSorted(variableName);
+        if (declarations.length === 0) {
             // Class doesn't map to a known CSS variable
             return;
         }
 
-        // Use the first declaration (prioritize :root context)
-        const declaration = declarations.sort((a: CSSVariableDeclaration, b: CSSVariableDeclaration) => 
-            a.context.specificity - b.context.specificity
-        )[0];
-        
-        // Resolve nested variables recursively
-        let colorValue = this.resolveNestedVariables(declaration.value);
+        const declaration = declarations[0];
+
+        let colorValue = declaration.resolvedValue ?? this.resolveNestedVariables(declaration.value);
 
         // Try to parse the resolved value as a color
         const parsed = this.colorParser.parseColor(colorValue);
@@ -251,11 +256,10 @@ export class ColorDetector {
             return;
         }
 
-        // Use the first declaration
         const declaration = declarations[0];
         
         // Resolve any CSS variables in the value
-        const resolvedValue = this.resolveNestedVariables(declaration.value);
+        const resolvedValue = declaration.resolvedValue ?? this.resolveNestedVariables(declaration.value);
         const parsed = this.colorParser.parseColor(resolvedValue);
         if (!parsed) {
             return;
@@ -279,27 +283,35 @@ export class ColorDetector {
      */
     private resolveNestedVariables(value: string, visited = new Set<string>()): string {
         const varRegex = /var\(\s*(--[\w-]+)\s*\)/g;
-        let match: RegExpExecArray | null;
-        let result = value;
+        let resolvedValue = value;
 
-        while ((match = varRegex.exec(value)) !== null) {
-            const varName = match[1];
-            
-            // Prevent circular references
-            if (visited.has(varName)) {
-                continue;
-            }
+        let replaced: boolean;
+        do {
+            replaced = false;
+            varRegex.lastIndex = 0;
+            let match: RegExpExecArray | null;
+            while ((match = varRegex.exec(resolvedValue)) !== null) {
+                const varName = match[1];
 
-            const declarations = this.registry.getVariable(varName);
-            if (declarations && declarations.length > 0) {
+                if (visited.has(varName)) {
+                    continue;
+                }
+
+                const declarations = this.registry.getVariablesSorted(varName);
+                if (declarations.length === 0) {
+                    continue;
+                }
+
                 visited.add(varName);
-                const resolvedValue = this.resolveNestedVariables(declarations[0].value, visited);
-                result = result.replace(match[0], resolvedValue);
+                const nestedResolved = this.resolveNestedVariables(declarations[0].value, visited);
                 visited.delete(varName);
-            }
-        }
 
-        return result;
+                resolvedValue = resolvedValue.replace(match[0], nestedResolved);
+                replaced = true;
+            }
+        } while (replaced);
+
+        return resolvedValue;
     }
 
     /**
