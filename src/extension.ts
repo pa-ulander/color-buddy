@@ -10,7 +10,7 @@ import {
     COLOR_SWATCH_BORDER,
     LOG_PREFIX
 } from './utils/constants';
-import { t, LocalizedStrings } from './i18n/localization';
+import { t, LocalizedStrings } from './l10n/localization';
 import {
     Registry,
     Cache,
@@ -37,6 +37,7 @@ class ExtensionController implements vscode.Disposable {
     private readonly provider: Provider;
     private readonly disposables: vscode.Disposable[] = [];
     private cssFileWatcher: vscode.FileSystemWatcher | null = null;
+    private registeredLanguageKey: string | null = null;
 
     constructor(private readonly context: vscode.ExtensionContext) {
         // Initialize services with dependency injection
@@ -217,13 +218,22 @@ class ExtensionController implements vscode.Disposable {
      * Register language feature providers (hover, color picker).
      */
     private registerLanguageProviders(): void {
-        this.stateManager.clearProviderSubscriptions();
-
         const languages = this.getConfiguredLanguages();
 
         if (!languages || languages.length === 0) {
+            this.stateManager.clearProviderSubscriptions();
+            this.registeredLanguageKey = null;
             return;
         }
+
+        const languageKey = JSON.stringify(languages);
+        if (this.registeredLanguageKey === languageKey) {
+            return;
+        }
+
+        this.registeredLanguageKey = languageKey;
+
+        this.stateManager.clearProviderSubscriptions();
 
         const selector = this.createDocumentSelector(languages);
 
@@ -536,6 +546,7 @@ class ExtensionController implements vscode.Disposable {
         this.cache.clear();
         this.cssFileWatcher?.dispose();
         this.disposables.forEach(d => d.dispose());
+        this.registeredLanguageKey = null;
     }
 }
 
