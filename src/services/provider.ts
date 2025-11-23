@@ -3,7 +3,7 @@ import { ColorParser } from './colorParser';
 import { ColorFormatter } from './colorFormatter';
 import { CSSParser } from './cssParser';
 import { Registry } from './registry';
-import { t, LocalizedStrings } from '../i18n/localization';
+import { t, LocalizedStrings } from '../l10n/localization';
 
 /**
  * Provider service for VS Code language providers (hover, color provider).
@@ -162,7 +162,7 @@ export class Provider {
         
         // Show resolved values for different contexts
         if (rootDecl) {
-            const resolvedRoot = this.cssParser.resolveNestedVariables(rootDecl.value);
+            const resolvedRoot = rootDecl.resolvedValue ?? this.cssParser.resolveNestedVariables(rootDecl.value);
             const rootParsed = this.colorParser.parseColor(resolvedRoot);
             if (rootParsed) {
                 const swatchUri = this.createColorSwatchDataUri(rootParsed.cssString);
@@ -175,7 +175,7 @@ export class Provider {
         
         // Show light theme variant if available
         if (lightDecl && lightDecl !== rootDecl) {
-            const resolvedLight = this.cssParser.resolveNestedVariables(lightDecl.value);
+            const resolvedLight = lightDecl.resolvedValue ?? this.cssParser.resolveNestedVariables(lightDecl.value);
             const lightParsed = this.colorParser.parseColor(resolvedLight);
             if (lightParsed) {
                 const swatchUri = this.createColorSwatchDataUri(lightParsed.cssString);
@@ -188,7 +188,7 @@ export class Provider {
         
         // Show dark theme variant if available
         if (darkDecl) {
-            const resolvedDark = this.cssParser.resolveNestedVariables(darkDecl.value);
+            const resolvedDark = darkDecl.resolvedValue ?? this.cssParser.resolveNestedVariables(darkDecl.value);
             const darkParsed = this.colorParser.parseColor(resolvedDark);
             if (darkParsed) {
                 const swatchUri = this.createColorSwatchDataUri(darkParsed.cssString);
