@@ -11,3 +11,4 @@ export { ColorFormatter } from './colorFormatter';
 export { ColorDetector } from './colorDetector';
 export { CSSParser } from './cssParser';
 export { Provider } from './provider';
+export { ExtensionController } from './extensionController';
