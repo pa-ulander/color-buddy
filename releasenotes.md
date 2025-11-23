@@ -4,10 +4,9 @@
 
 ## Version 0.0.3 - November 23, 2025
 
-### Swatch Revival & Sass Parity
+### Major Refactoring & Sass Parity
 
-This release is focused on refactoring and general code improvements.
-Not so much on adding new features.  
+This release is focused on refactoring, performance optimization and general code improvements and not so much on adding new features.  
 Tightened Sass support so color tooling feels consistent across your stylesheets.
 
 ### What Changed
