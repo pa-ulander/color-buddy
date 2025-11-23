@@ -1,4 +1,14 @@
 import * as vscode from 'vscode';
+import type {
+    ColorData,
+    DocumentColorCache,
+    CSSVariableDeclaration,
+    CSSVariableContext,
+    CSSClassColorDeclaration,
+    ParsedColor,
+    ColorFormat
+} from './types';
+import { DEFAULT_LANGUAGES } from './types';
 
 process.on('uncaughtException', error => {
     console.error('[cb] uncaught exception', error);
@@ -8,11 +18,6 @@ process.on('unhandledRejection', reason => {
     console.error('[cb] unhandled rejection', reason);
 });
 
-interface DocumentColorCache {
-    version: number;
-    data: ColorData[];
-}
-
 const colorDataCache = new Map<string, DocumentColorCache>();
 const pendingColorComputations = new Map<string, Promise<ColorData[]>>();
 const cssVariableRegistry = new Map<string, CSSVariableDeclaration[]>();
@@ -20,97 +25,6 @@ const cssClassColorRegistry = new Map<string, CSSClassColorDeclaration[]>();
 const cssVariableDecorations = new Map<string, vscode.TextEditorDecorationType>();
 let providerSubscriptions: vscode.Disposable[] = [];
 let isProbingNativeColors = false;
-
-interface ColorData {
-    range: vscode.Range;
-    originalText: string;
-    normalizedColor: string;
-    vscodeColor: vscode.Color;
-    isCssVariable?: boolean;
-    variableName?: string;
-    isWrappedInFunction?: boolean;
-    isTailwindClass?: boolean;
-    tailwindClass?: string;
-    isCssClass?: boolean;
-    cssClassName?: string;
-}
-
-interface CSSVariableReference {
-    range: vscode.Range;
-    variableName: string;
-    wrappingFunction?: 'hsl' | 'rgb' | 'rgba' | 'hsla';
-}
-
-interface CSSVariableDeclaration {
-    name: string;
-    value: string;
-    uri: vscode.Uri;
-    line: number;
-    selector: string;
-    context: CSSVariableContext;
-    resolvedValue?: string; // Cached resolved value after nested variable expansion
-}
-
-interface CSSVariableContext {
-    type: 'root' | 'class' | 'media' | 'other';
-    themeHint?: 'light' | 'dark'; // Detected from selector (e.g., .dark, [data-theme="dark"])
-    mediaQuery?: string; // For @media contexts
-    specificity: number; // CSS specificity score for context resolution
-}
-
-interface CSSClassColorDeclaration {
-    className: string;
-    property: string; // 'color', 'background-color', etc.
-    value: string;
-    uri: vscode.Uri;
-    line: number;
-    selector: string;
-}
-
-const DEFAULT_LANGUAGES = [
-    'css',
-    'scss',
-    'sass',
-    'less',
-    'stylus',
-    'postcss',
-    'html',
-    'xml',
-    'svg',
-    'javascript',
-    'javascriptreact',
-    'typescript',
-    'typescriptreact',
-    'vue',
-    'svelte',
-    'astro',
-    'json',
-    'jsonc',
-    'yaml',
-    'toml',
-    'markdown',
-    'mdx',
-    'plaintext',
-    'python',
-    'ruby',
-    'php',
-    'perl',
-    'go',
-    'rust',
-    'java',
-    'kotlin',
-    'swift',
-    'csharp',
-    'cpp',
-    'c',
-    'objective-c',
-    'dart',
-    'lua',
-    'shellscript',
-    'powershell',
-    'sql',
-    'graphql'
-];
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('[cb] activating...');
@@ -735,7 +649,7 @@ function collectColorData(document: vscode.TextDocument, text: string): ColorDat
         const classList = classMatch[1].split(/\s+/);
         for (const className of classList) {
             if (className && cssClassColorRegistry.has(className)) {
-                collectCSSClassColor(document, text, classMatch.index + classMatch[0].indexOf(className), className, results, seenRanges);
+                collectCSSClassColor(document, classMatch.index + classMatch[0].indexOf(className), className, results, seenRanges);
             }
         }
     }
@@ -801,7 +715,6 @@ function collectTailwindClass(
 
 function collectCSSClassColor(
     document: vscode.TextDocument,
-    text: string,
     startIndex: number,
     className: string,
     results: ColorData[],
@@ -1023,14 +936,11 @@ async function provideColorHover(document: vscode.TextDocument, position: vscode
                     if (a < 1) {
                         markdown.appendMarkdown(` (α: ${a.toFixed(2)})`);
                     }
-                    markdown.appendMarkdown(`\n\n`);
-                    
-                    // Add accessibility check against common backgrounds
-                    const luminance = getRelativeLuminance(data.vscodeColor);
-                    const white = new vscode.Color(1, 1, 1, 1);
-                    const black = new vscode.Color(0, 0, 0, 1);
-                    
-                    const contrastWhite = getContrastRatio(data.vscodeColor, white);
+                markdown.appendMarkdown(`\n\n`);
+                
+                // Add accessibility check against common backgrounds
+                const white = new vscode.Color(1, 1, 1, 1);
+                const black = new vscode.Color(0, 0, 0, 1);                    const contrastWhite = getContrastRatio(data.vscodeColor, white);
                     const contrastBlack = getContrastRatio(data.vscodeColor, black);
                     
                     markdown.appendMarkdown(`**Accessibility:**\n\n`);
@@ -1202,14 +1112,6 @@ function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: n
     }
 
     return { h: h * 360, s: s * 100, l: l * 100 };
-}
-
-type ColorFormat = 'hex' | 'hexAlpha' | 'rgb' | 'rgba' | 'hsl' | 'hsla' | 'tailwind';
-
-interface ParsedColor {
-    vscodeColor: vscode.Color;
-    cssString: string;
-    formatPriority: ColorFormat[];
 }
 
 function parseColor(raw: string): ParsedColor | undefined {
