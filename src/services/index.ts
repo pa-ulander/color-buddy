@@ -8,3 +8,4 @@ export { Cache } from './cache';
 export { StateManager } from './stateManager';
 export { ColorParser } from './colorParser';
 export { ColorFormatter } from './colorFormatter';
+export { ColorDetector } from './colorDetector';
