@@ -38,6 +38,9 @@ export const DECORATION_CHUNK_SIZE = 2000;
 /** Default border color for SVG color swatches */
 export const SVG_SWATCH_STROKE = 'white';
 
+/** Delay applied when yielding between decoration chunks (ms) */
+export const DECORATION_CHUNK_YIELD_DELAY_MS = 0;
+
 /** Border width for SVG color swatches */
 export const SVG_SWATCH_STROKE_WIDTH = 1;
 
