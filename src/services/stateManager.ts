@@ -37,7 +37,7 @@ interface QueuedRefresh {
  * Manages extension state and lifecycle
  */
 export class StateManager {
-    private decorations: Map<string, vscode.TextEditorDecorationType>;
+    private decorations: Map<string, vscode.TextEditorDecorationType[]>;
     private providerSubscriptions: vscode.Disposable[];
     private probingDocuments: Set<string>;
     private cachedLanguages: string[] | undefined;
@@ -62,29 +62,32 @@ export class StateManager {
     /**
      * Get or create a decoration type for an editor
      */
-    getDecoration(editorKey: string): vscode.TextEditorDecorationType | undefined {
+    getDecoration(editorKey: string): vscode.TextEditorDecorationType[] | undefined {
         return this.decorations.get(editorKey);
     }
 
     /**
      * Set decoration for an editor
      */
-    setDecoration(editorKey: string, decoration: vscode.TextEditorDecorationType): void {
-        // Dispose old decoration if exists
+    setDecoration(editorKey: string, decorations: vscode.TextEditorDecorationType[]): void {
         const existing = this.decorations.get(editorKey);
         if (existing) {
-            existing.dispose();
+            for (const decoration of existing) {
+                decoration.dispose();
+            }
         }
-        this.decorations.set(editorKey, decoration);
+        this.decorations.set(editorKey, decorations);
     }
 
     /**
      * Remove and dispose decoration for an editor
      */
     removeDecoration(editorKey: string): void {
-        const decoration = this.decorations.get(editorKey);
-        if (decoration) {
-            decoration.dispose();
+        const decorations = this.decorations.get(editorKey);
+        if (decorations) {
+            for (const decoration of decorations) {
+                decoration.dispose();
+            }
             this.decorations.delete(editorKey);
         }
     }
@@ -93,8 +96,10 @@ export class StateManager {
      * Clear all decorations
      */
     clearAllDecorations(): void {
-        for (const decoration of this.decorations.values()) {
-            decoration.dispose();
+        for (const decorations of this.decorations.values()) {
+            for (const decoration of decorations) {
+                decoration.dispose();
+            }
         }
         this.decorations.clear();
     }
@@ -187,7 +192,11 @@ export class StateManager {
      * Get the number of active decorations
      */
     get decorationCount(): number {
-        return this.decorations.size;
+        let count = 0;
+        for (const decorations of this.decorations.values()) {
+            count += decorations.length;
+        }
+        return count;
     }
 
     /**

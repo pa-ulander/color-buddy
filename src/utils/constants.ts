@@ -32,6 +32,9 @@ export const COLOR_SWATCH_BORDER = '1px solid #fff';
 /** Content text used for color swatch decorations */
 export const COLOR_SWATCH_CONTENT = ' ';
 
+/** Maximum number of decoration ranges per batch when applying swatches */
+export const DECORATION_CHUNK_SIZE = 2000;
+
 /** Default border color for SVG color swatches */
 export const SVG_SWATCH_STROKE = 'white';
 

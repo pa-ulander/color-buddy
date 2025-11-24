@@ -98,7 +98,7 @@ suite('Cache Service', () => {
             const data = [createMockColorData()];
             const computation = async () => data;
 
-            const result = await cache.getPendingOrCompute(key, computation);
+            const result = await cache.getPendingOrCompute(key, 1, computation);
 
             assert.strictEqual(result, data);
         });
@@ -115,8 +115,8 @@ suite('Cache Service', () => {
             };
 
             // Start two concurrent requests
-            const promise1 = cache.getPendingOrCompute(key, computation);
-            const promise2 = cache.getPendingOrCompute(key, computation);
+            const promise1 = cache.getPendingOrCompute(key, 1, computation);
+            const promise2 = cache.getPendingOrCompute(key, 1, computation);
 
             const [result1, result2] = await Promise.all([promise1, promise2]);
 
@@ -132,7 +132,7 @@ suite('Cache Service', () => {
             assert.strictEqual(cache.hasPending(key), false);
             assert.strictEqual(cache.pendingCount, 0);
 
-            const promise = cache.getPendingOrCompute(key, computation);
+            const promise = cache.getPendingOrCompute(key, 1, computation);
             assert.strictEqual(cache.hasPending(key), true);
             assert.strictEqual(cache.pendingCount, 1);
 
@@ -149,7 +149,7 @@ suite('Cache Service', () => {
             };
 
             try {
-                await cache.getPendingOrCompute(key, computation);
+                await cache.getPendingOrCompute(key, 1, computation);
                 assert.fail('Should have thrown error');
             } catch (error) {
                 // Expected
@@ -166,7 +166,7 @@ suite('Cache Service', () => {
                 return [];
             };
 
-            void cache.getPendingOrCompute(uri, computation);
+            void cache.getPendingOrCompute(uri, 1, computation);
             assert.strictEqual(cache.hasPending(uri), true);
 
             cache.delete(uri);
@@ -179,8 +179,8 @@ suite('Cache Service', () => {
                 return [];
             };
 
-            void cache.getPendingOrCompute('key1', computation);
-            void cache.getPendingOrCompute('key2', computation);
+            void cache.getPendingOrCompute('key1', 1, computation);
+            void cache.getPendingOrCompute('key2', 1, computation);
             assert.strictEqual(cache.pendingCount, 2);
 
             cache.clear();
@@ -188,6 +188,29 @@ suite('Cache Service', () => {
             assert.strictEqual(cache.pendingCount, 0);
             assert.strictEqual(cache.hasPending('key1'), false);
             assert.strictEqual(cache.hasPending('key2'), false);
+        });
+
+        test('newer version supersedes existing pending computation', async () => {
+            const key = 'file:///test.css';
+            const slowData = [createMockColorData({ originalText: '#111111' })];
+            const fastData = [createMockColorData({ originalText: '#222222' })];
+
+            const slowPromise = cache.getPendingOrCompute(key, 1, async () => {
+                await new Promise(resolve => setTimeout(resolve, 25));
+                return slowData;
+            });
+
+            assert.strictEqual(cache.pendingCount, 1);
+
+            const fastPromise = cache.getPendingOrCompute(key, 2, async () => fastData);
+
+            assert.strictEqual(cache.pendingCount, 1);
+
+            const [slowResult, fastResult] = await Promise.all([slowPromise, fastPromise]);
+
+            assert.strictEqual(slowResult, slowData);
+            assert.strictEqual(fastResult, fastData);
+            assert.strictEqual(cache.pendingCount, 0);
         });
     });
 
