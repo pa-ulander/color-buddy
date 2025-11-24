@@ -14,15 +14,23 @@ const REFRESH_AVERAGE_ALPHA = 0.3;
 
 type RefreshTimer = ReturnType<typeof setTimeout>;
 
+interface RefreshCompletion {
+    promise: Promise<void>;
+    resolve: () => void;
+    reject: (error: unknown) => void;
+}
+
 interface RefreshEntry {
     timer: RefreshTimer;
     run: () => Promise<void>;
     version: number;
+    completion: RefreshCompletion;
 }
 
 interface QueuedRefresh {
     run: () => Promise<void>;
     version: number;
+    completion: RefreshCompletion;
 }
 
 /**
@@ -225,13 +233,19 @@ export class StateManager {
         version: number,
         run: () => Promise<void>,
         options?: { immediate?: boolean }
-    ): void {
+    ): Promise<void> {
+        const completion = this.createCompletion();
+
         if (this.executingRefreshes.has(editorKey)) {
             const queued = this.queuedAfterRun.get(editorKey);
             if (!queued || version >= queued.version) {
-                this.queuedAfterRun.set(editorKey, { run, version });
+                this.queuedAfterRun.set(editorKey, { run, version, completion });
+                if (queued) {
+                    queued.completion.resolve();
+                }
+                return completion.promise;
             }
-            return;
+            return queued.completion.promise;
         }
 
         const delay = options?.immediate ? 0 : this.calculateDelay(editorKey);
@@ -239,16 +253,18 @@ export class StateManager {
 
         if (existing) {
             if (version < existing.version) {
-                return;
+                return existing.completion.promise;
             }
             clearTimeout(existing.timer);
+            existing.completion.resolve();
             const timer = setTimeout(() => this.executeScheduledRefresh(editorKey), delay);
-            this.refreshEntries.set(editorKey, { timer, run, version });
-            return;
+            this.refreshEntries.set(editorKey, { timer, run, version, completion });
+            return completion.promise;
         }
 
         const timer = setTimeout(() => this.executeScheduledRefresh(editorKey), delay);
-        this.refreshEntries.set(editorKey, { timer, run, version });
+        this.refreshEntries.set(editorKey, { timer, run, version, completion });
+        return completion.promise;
     }
 
     /**
@@ -259,6 +275,11 @@ export class StateManager {
         if (entry) {
             clearTimeout(entry.timer);
             this.refreshEntries.delete(editorKey);
+            entry.completion.resolve();
+        }
+        const queued = this.queuedAfterRun.get(editorKey);
+        if (queued) {
+            queued.completion.resolve();
         }
         this.queuedAfterRun.delete(editorKey);
     }
@@ -284,6 +305,20 @@ export class StateManager {
         return this.refreshAverages.get(editorKey);
     }
 
+    private createCompletion(): RefreshCompletion {
+        let resolve: () => void;
+        let reject: (error: unknown) => void;
+        const promise = new Promise<void>((res, rej) => {
+            resolve = res;
+            reject = rej;
+        });
+        return {
+            promise,
+            resolve: resolve!,
+            reject: reject!
+        };
+    }
+
     private calculateDelay(editorKey: string): number {
         const avg = this.refreshAverages.get(editorKey);
         if (avg !== undefined && avg > HEAVY_REFRESH_THRESHOLD_MS) {
@@ -303,6 +338,7 @@ export class StateManager {
 
         try {
             await entry.run();
+            entry.completion.resolve();
         } finally {
             this.executingRefreshes.delete(editorKey);
             const queued = this.queuedAfterRun.get(editorKey);

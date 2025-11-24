@@ -9,7 +9,7 @@ suite('CSS Decorations', () => {
 		const { controller, restore } = await createControllerHarness();
 		try {
 			const extensionRoot = vscode.Uri.file(path.join(__dirname, '..', '..', '..'));
-			const uri = vscode.Uri.joinPath(extensionRoot, 'examples', 'example.css');
+			const uri = vscode.Uri.joinPath(extensionRoot, 'src', 'test', 'integration', 'fixtures', 'css-variable-decorations.css');
 			const document = await vscode.workspace.openTextDocument(uri);
 
 			const applied: DecorationCapture[] = [];
