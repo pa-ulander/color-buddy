@@ -3,12 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { createControllerHarness } from '../helpers/controllerHarness';
-
-type DecorationCapture = {
-	type: vscode.TextEditorDecorationType;
-	options: readonly vscode.DecorationOptions[];
-};
-
+import { DecorationCapture } from '../helpers/types';
 function buildLargeCssDocument(variableCount = 200, blockCount = 600): string {
 	const lines: string[] = [];
 	lines.push(':root {');
