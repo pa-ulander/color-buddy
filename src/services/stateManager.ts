@@ -7,6 +7,24 @@
 
 import * as vscode from 'vscode';
 
+const DEFAULT_REFRESH_DELAY_MS = 32;
+const HEAVY_REFRESH_THRESHOLD_MS = 250;
+const HEAVY_REFRESH_DELAY_MS = 120;
+const REFRESH_AVERAGE_ALPHA = 0.3;
+
+type RefreshTimer = ReturnType<typeof setTimeout>;
+
+interface RefreshEntry {
+    timer: RefreshTimer;
+    run: () => Promise<void>;
+    version: number;
+}
+
+interface QueuedRefresh {
+    run: () => Promise<void>;
+    version: number;
+}
+
 /**
  * Manages extension state and lifecycle
  */
@@ -16,7 +34,10 @@ export class StateManager {
     private probingDocuments: Set<string>;
     private cachedLanguages: string[] | undefined;
     private visibleEditors: Set<string>;
-    private pendingRefreshes: Map<string, number>;
+    private refreshEntries: Map<string, RefreshEntry>;
+    private executingRefreshes: Set<string>;
+    private queuedAfterRun: Map<string, QueuedRefresh>;
+    private refreshAverages: Map<string, number>;
 
     constructor() {
         this.decorations = new Map();
@@ -24,7 +45,10 @@ export class StateManager {
         this.probingDocuments = new Set();
         this.cachedLanguages = undefined;
         this.visibleEditors = new Set();
-        this.pendingRefreshes = new Map();
+        this.refreshEntries = new Map();
+        this.executingRefreshes = new Set();
+        this.queuedAfterRun = new Map();
+        this.refreshAverages = new Map();
     }
 
     /**
@@ -142,6 +166,13 @@ export class StateManager {
         this.clearProviderSubscriptions();
         this.probingDocuments.clear();
         this.cachedLanguages = undefined;
+        for (const entry of this.refreshEntries.values()) {
+            clearTimeout(entry.timer);
+        }
+        this.refreshEntries.clear();
+        this.executingRefreshes.clear();
+        this.queuedAfterRun.clear();
+        this.refreshAverages.clear();
     }
 
     /**
@@ -187,31 +218,97 @@ export class StateManager {
     }
 
     /**
-     * Check if a refresh is pending for an editor (within last 100ms)
+     * Schedule a refresh for the provided editor, coalescing rapid-fire requests.
      */
-    isRefreshPending(editorKey: string): boolean {
-        const lastRefresh = this.pendingRefreshes.get(editorKey);
-        if (!lastRefresh) {
-            return false;
+    scheduleRefresh(
+        editorKey: string,
+        version: number,
+        run: () => Promise<void>,
+        options?: { immediate?: boolean }
+    ): void {
+        if (this.executingRefreshes.has(editorKey)) {
+            const queued = this.queuedAfterRun.get(editorKey);
+            if (!queued || version >= queued.version) {
+                this.queuedAfterRun.set(editorKey, { run, version });
+            }
+            return;
         }
-        return (Date.now() - lastRefresh) < 100;
+
+        const delay = options?.immediate ? 0 : this.calculateDelay(editorKey);
+        const existing = this.refreshEntries.get(editorKey);
+
+        if (existing) {
+            if (version < existing.version) {
+                return;
+            }
+            clearTimeout(existing.timer);
+            const timer = setTimeout(() => this.executeScheduledRefresh(editorKey), delay);
+            this.refreshEntries.set(editorKey, { timer, run, version });
+            return;
+        }
+
+        const timer = setTimeout(() => this.executeScheduledRefresh(editorKey), delay);
+        this.refreshEntries.set(editorKey, { timer, run, version });
     }
 
     /**
-     * Mark a refresh as pending for an editor
+     * Cancel any scheduled refresh for the provided editor.
      */
-    markRefreshPending(editorKey: string): void {
-        this.pendingRefreshes.set(editorKey, Date.now());
+    cancelScheduledRefresh(editorKey: string): void {
+        const entry = this.refreshEntries.get(editorKey);
+        if (entry) {
+            clearTimeout(entry.timer);
+            this.refreshEntries.delete(editorKey);
+        }
+        this.queuedAfterRun.delete(editorKey);
     }
 
     /**
-     * Clear old pending refreshes (older than 1 second)
+     * Record a refresh duration and track a rolling exponential moving average.
      */
-    clearOldPendingRefreshes(): void {
-        const now = Date.now();
-        for (const [key, timestamp] of this.pendingRefreshes.entries()) {
-            if (now - timestamp > 1000) {
-                this.pendingRefreshes.delete(key);
+    recordRefreshDuration(editorKey: string, durationMs: number): void {
+        const current = this.refreshAverages.get(editorKey);
+        if (current === undefined) {
+            this.refreshAverages.set(editorKey, durationMs);
+            return;
+        }
+
+        const next = (current * (1 - REFRESH_AVERAGE_ALPHA)) + (durationMs * REFRESH_AVERAGE_ALPHA);
+        this.refreshAverages.set(editorKey, next);
+    }
+
+    /**
+     * Retrieve the current rolling average duration for an editor, if available.
+     */
+    getAverageRefreshDuration(editorKey: string): number | undefined {
+        return this.refreshAverages.get(editorKey);
+    }
+
+    private calculateDelay(editorKey: string): number {
+        const avg = this.refreshAverages.get(editorKey);
+        if (avg !== undefined && avg > HEAVY_REFRESH_THRESHOLD_MS) {
+            return HEAVY_REFRESH_DELAY_MS;
+        }
+        return DEFAULT_REFRESH_DELAY_MS;
+    }
+
+    private async executeScheduledRefresh(editorKey: string): Promise<void> {
+        const entry = this.refreshEntries.get(editorKey);
+        if (!entry) {
+            return;
+        }
+
+        this.refreshEntries.delete(editorKey);
+        this.executingRefreshes.add(editorKey);
+
+        try {
+            await entry.run();
+        } finally {
+            this.executingRefreshes.delete(editorKey);
+            const queued = this.queuedAfterRun.get(editorKey);
+            if (queued) {
+                this.queuedAfterRun.delete(editorKey);
+                this.scheduleRefresh(editorKey, queued.version, queued.run);
             }
         }
     }
