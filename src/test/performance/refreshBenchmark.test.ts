@@ -60,7 +60,10 @@ suite('Refresh Benchmark', () => {
 			assert.ok(decorationCount > 0, 'Expected decorations on synthetic large document');
 
 			const logDir = path.join(__dirname, '..', '..', '..', 'logs', 'metrics');
-			const logPath = path.join(logDir, '2025-11-24-refresh-benchmark.json');
+			const logPath = path.join(
+				logDir,
+				`${new Date().toISOString().split('T')[0]}-refresh-benchmark.json`
+			);
 			const payload = {
 				timestamp: new Date().toISOString(),
 				durationMs: Number(durationMs.toFixed(2)),
