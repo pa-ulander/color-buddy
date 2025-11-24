@@ -46,6 +46,7 @@ export class StateManager {
     private executingRefreshes: Set<string>;
     private queuedAfterRun: Map<string, QueuedRefresh>;
     private refreshAverages: Map<string, number>;
+    private decorationSnapshots: Map<string, Map<number, string>>;
 
     constructor() {
         this.decorations = new Map();
@@ -57,6 +58,7 @@ export class StateManager {
         this.executingRefreshes = new Set();
         this.queuedAfterRun = new Map();
         this.refreshAverages = new Map();
+        this.decorationSnapshots = new Map();
     }
 
     /**
@@ -80,6 +82,58 @@ export class StateManager {
     }
 
     /**
+     * Ensure a reusable decoration pool exists for an editor.
+     * Expands the pool using the provided factory when additional entries are required.
+     */
+    ensureDecorationPool(
+        editorKey: string,
+        desiredSize: number,
+        factory: () => vscode.TextEditorDecorationType
+    ): vscode.TextEditorDecorationType[] {
+        let pool = this.decorations.get(editorKey);
+        if (!pool) {
+            pool = [];
+            this.decorations.set(editorKey, pool);
+        }
+
+        while (pool.length < desiredSize) {
+            pool.push(factory());
+        }
+
+        return pool;
+    }
+
+    setDecorationChunkSignature(editorKey: string, chunkIndex: number, signature: string): void {
+        let snapshots = this.decorationSnapshots.get(editorKey);
+        if (!snapshots) {
+            snapshots = new Map();
+            this.decorationSnapshots.set(editorKey, snapshots);
+        }
+        snapshots.set(chunkIndex, signature);
+    }
+
+    getDecorationChunkSignature(editorKey: string, chunkIndex: number): string | undefined {
+        return this.decorationSnapshots.get(editorKey)?.get(chunkIndex);
+    }
+
+    pruneDecorationSnapshots(editorKey: string, keepCount: number): void {
+        const snapshots = this.decorationSnapshots.get(editorKey);
+        if (!snapshots) {
+            return;
+        }
+
+        for (const [index] of snapshots) {
+            if (index >= keepCount) {
+                snapshots.delete(index);
+            }
+        }
+    }
+
+    clearDecorationSnapshots(editorKey: string): void {
+        this.decorationSnapshots.delete(editorKey);
+    }
+
+    /**
      * Remove and dispose decoration for an editor
      */
     removeDecoration(editorKey: string): void {
@@ -90,6 +144,7 @@ export class StateManager {
             }
             this.decorations.delete(editorKey);
         }
+        this.decorationSnapshots.delete(editorKey);
     }
 
     /**
@@ -102,6 +157,7 @@ export class StateManager {
             }
         }
         this.decorations.clear();
+        this.decorationSnapshots.clear();
     }
 
     /**
@@ -186,6 +242,7 @@ export class StateManager {
         this.executingRefreshes.clear();
         this.queuedAfterRun.clear();
         this.refreshAverages.clear();
+        this.decorationSnapshots.clear();
     }
 
     /**
