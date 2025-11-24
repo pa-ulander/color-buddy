@@ -1,4 +1,6 @@
 .github/*.md
+!.github/backlog.md
+!.github/worklog.md
 .vscode-test/*
 !img
 node_modules

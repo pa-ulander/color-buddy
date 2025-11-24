@@ -301,6 +301,28 @@ suite('ColorDetector Service', () => {
             
             assert.strictEqual(results.length, 0);
         });
+
+        test('should not treat CSS variable names as Tailwind classes', () => {
+            const context: CSSVariableContext = { type: 'root', specificity: 0 };
+            const decl: CSSVariableDeclaration = {
+                name: '--text-foreground',
+                value: '#111111',
+                uri: vscode.Uri.parse('file:///test.css'),
+                line: 0,
+                selector: ':root',
+                context
+            };
+            registry.addVariable('--text-foreground', decl);
+
+            const doc = createMockDocument('color: var(--text-foreground);');
+            const results = detector.collectColorData(doc, doc.getText());
+
+            const tailwindMatches = results.filter(result => result.isTailwindClass);
+            assert.strictEqual(tailwindMatches.length, 0, 'Expected no Tailwind class matches');
+
+            const cssVariableMatch = results.find(result => result.isCssVariable && result.variableName === '--text-foreground');
+            assert.ok(cssVariableMatch, 'Expected CSS variable reference to be detected');
+        });
     });
 
     suite('CSS Class Colors', () => {
