@@ -37,8 +37,9 @@ suite('CSS Decorations', () => {
 	test('aligns Tailwind and CSS variable decorations on mixed lines', async () => {
 		const { controller, restore } = await createControllerHarness();
 		try {
+			// Use a dedicated test fixture to avoid dependency on example.css content
 			const extensionRoot = vscode.Uri.file(path.join(__dirname, '..', '..', '..'));
-			const uri = vscode.Uri.joinPath(extensionRoot, 'examples', 'example.css');
+			const uri = vscode.Uri.joinPath(extensionRoot, 'src', 'test', 'integration', 'fixtures', 'tailwind-alignment.css');
 			const document = await vscode.workspace.openTextDocument(uri);
 
 			const applied: DecorationCapture[] = [];
@@ -75,7 +76,7 @@ suite('CSS Decorations', () => {
 				const text = document.lineAt(line).text;
 				return text.includes('@apply') && text.includes('bg-background');
 			});
-			assert.ok(applyLineIndex !== undefined, 'Expected to find @apply line in example.css');
+			assert.ok(applyLineIndex !== undefined, 'Expected to find @apply line in fixture file');
 			const applyLineText = document.lineAt(applyLineIndex!).text;
 
 			const bgColumn = applyLineText.indexOf('bg-background');
