@@ -1,7 +1,7 @@
 {
   "name": "colorbuddy",
   "displayName": "Color Buddy - Your VS Code Color Companion",
-  "description": "Adds color indicators and displays info on hover anywhere a color code is found. Quickly find an navigate to color definitions",
+  "description": "Adds color indicators and displays some useful info on hover anywhere a color code, cssclass or style containing a colordefinition or --variable is found. Helps you to quickly find and navigate to the color definition.",
   "version": "0.0.3",
   "publisher": "PAUlander",
   "repository": {
