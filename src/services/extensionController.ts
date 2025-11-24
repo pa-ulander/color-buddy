@@ -10,6 +10,7 @@ import {
 	COLOR_SWATCH_BORDER,
 	COLOR_SWATCH_CONTENT,
 	DECORATION_CHUNK_SIZE,
+	DECORATION_CHUNK_YIELD_DELAY_MS,
 	LOG_PREFIX
 } from '../utils/constants';
 import { perfLogger } from '../utils/performanceLogger';
@@ -420,7 +421,7 @@ export class ExtensionController implements vscode.Disposable {
 					perfLogger.log('Document version changed during refresh, aborting apply', editor.document.uri.fsPath);
 					return;
 				}
-				this.applyCSSVariableDecorations(editor, colorData);
+				await this.applyCSSVariableDecorations(editor, colorData);
 			} catch (error) {
 				console.error(`${LOG_PREFIX} failed to refresh color data`, error);
 			} finally {
@@ -533,7 +534,7 @@ export class ExtensionController implements vscode.Disposable {
 	/**
 	 * Apply CSS variable decorations to an editor.
 	 */
-	private applyCSSVariableDecorations(editor: vscode.TextEditor, colorData: ColorData[]): void {
+	private async applyCSSVariableDecorations(editor: vscode.TextEditor, colorData: ColorData[]): Promise<void> {
 		perfLogger.start('applyCSSVariableDecorations');
 		const editorKey = this.getEditorKey(editor);
 		const existingDecorations = this.stateManager.getDecoration(editorKey);
@@ -606,6 +607,7 @@ export class ExtensionController implements vscode.Disposable {
 				})
 			);
 
+			let yieldedBetweenChunks = false;
 			for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
 				const chunkStart = chunkIndex * DECORATION_CHUNK_SIZE;
 				const chunk = decorationRangesWithOptions.slice(chunkStart, chunkStart + DECORATION_CHUNK_SIZE);
@@ -615,6 +617,18 @@ export class ExtensionController implements vscode.Disposable {
 				}
 				editor.setDecorations(decorationPool[chunkIndex], chunk);
 				this.stateManager.setDecorationChunkSignature(editorKey, chunkIndex, signature);
+
+				if (chunkCount > 1 && chunkIndex < chunkCount - 1) {
+					if (!yieldedBetweenChunks) {
+						perfLogger.log('Yielding between decoration chunks', {
+							path: editor.document.uri.fsPath,
+							chunkCount,
+							yieldDelayMs: DECORATION_CHUNK_YIELD_DELAY_MS
+						});
+						yieldedBetweenChunks = true;
+					}
+					await this.delay(DECORATION_CHUNK_YIELD_DELAY_MS);
+				}
 			}
 
 			for (let poolIndex = chunkCount; poolIndex < decorationPool.length; poolIndex++) {
@@ -721,6 +735,10 @@ export class ExtensionController implements vscode.Disposable {
 	 */
 	private getEditorKey(editor: vscode.TextEditor): string {
 		return editor.document.uri.toString();
+	}
+
+	private async delay(ms: number): Promise<void> {
+		await new Promise<void>(resolve => setTimeout(resolve, ms));
 	}
 
 	private computeDecorationChunkSignature(chunk: readonly vscode.DecorationOptions[]): string {
