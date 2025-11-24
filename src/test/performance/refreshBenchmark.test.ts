@@ -54,7 +54,8 @@ suite('Refresh Benchmark', () => {
 			const decorationCount = applied.reduce((total, entry) => total + entry.options.length, 0);
 			assert.ok(decorationCount > 0, 'Expected decorations on synthetic large document');
 
-			const logDir = path.join(__dirname, '..', '..', '..', 'logs', 'metrics');
+			// Write benchmark results to 'benchmarks/metrics/' so they are not ignored by version control.
+			const logDir = path.join(__dirname, '..', '..', '..', 'benchmarks', 'metrics');
 			const logPath = path.join(
 				logDir,
 				`${new Date().toISOString().split('T')[0]}-refresh-benchmark.json`
