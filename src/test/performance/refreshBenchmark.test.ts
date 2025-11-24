@@ -56,9 +56,10 @@ suite('Refresh Benchmark', () => {
 
 			// Write benchmark results to 'benchmarks/metrics/' so they are not ignored by version control.
 			const logDir = path.join(__dirname, '..', '..', '..', 'benchmarks', 'metrics');
+			const timestamp = new Date().toISOString().replace(/:/g, '-').replace(/\..+/, '');
 			const logPath = path.join(
 				logDir,
-				`${new Date().toISOString().split('T')[0]}-refresh-benchmark.json`
+				`refresh-benchmark-${timestamp}.json`
 			);
 			const payload = {
 				timestamp: new Date().toISOString(),
