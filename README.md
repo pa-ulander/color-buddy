@@ -1,6 +1,6 @@
 [![Tests](https://github.com/pa-ulander/color-buddy/actions/workflows/tests.yml/badge.svg)](https://github.com/pa-ulander/color-buddy/actions/workflows/tests.yml) ![](https://ghvc.kabelkultur.se?username=pa-ulander&label=Repository%20visits&color=brightgreen&style=flat&repository=color-buddy)
 
-![](img/banner2.png)
+![](img/banner-2.png)
 
 ## ColorBuddy - Your VS Code Color Companion
 
