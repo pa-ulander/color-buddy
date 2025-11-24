@@ -2,11 +2,7 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { createControllerHarness } from '../helpers/controllerHarness';
-
-type DecorationCapture = {
-	type: vscode.TextEditorDecorationType;
-	options: readonly vscode.DecorationOptions[];
-};
+import { DecorationCapture } from '../helpers/types';
 
 suite('CSS Decorations', () => {
 	test('applies decorations for CSS variable declarations', async () => {
