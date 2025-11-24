@@ -51,7 +51,7 @@ Adds color indicators and mouseover information anywhere a common color code is 
 *   **CSS/Styling**: `css`, `scss`, `sass`, `less`, `stylus`, `postcss`
 *   **Markup**: `html`, `xml`, `svg`
 *   **JavaScript/TypeScript**: `javascript`, `javascriptreact`, `typescript`, `typescriptreact`
-*   **Modern Frameworks**: `vue`, `svelte`, `astro`
+*   **Common Frameworks**: `vue`, `svelte`, `astro`
 *   **Data/Config**: `json`, `jsonc`, `yaml`, `toml`
 *   **Markdown**: `markdown`, `mdx`
 *   **Programming Languages**: `python`, `ruby`, `php`, `perl`, `go`, `rust`, `java`, `kotlin`, `swift`, `csharp`, `cpp`, `c`, `objective-c`, `dart`, `lua`
@@ -70,7 +70,7 @@ Open VSCode and type `ctrl+p`, then type: `ext install PAUlander.colorbuddy`.
 
 *Install from vsix binary*
 
-1.  Download [latest vsix binary](https://github.com/pa-ulander/color-buddy/releases/download/v0.0.2/colorbuddy-0.0.2.vsix) or run `npm run package-vsix` to generate your own.
+1.  Download [latest vsix binary](https://github.com/pa-ulander/color-buddy/releases/download/v0.0.3/colorbuddy-0.0.3.vsix) or run `npm run package-vsix` to generate your own.
 2.  In VS Code press `Ctrl+Shift+P` (`Cmd+Shift+P` on macOS) and choose `Extensions: Install from VSIX`.
 3.  Pick the downloaded/generated `.vsix` file and reload the editor when prompted.
 4.  Alternatively, install via CLI with `code --install-extension color-buddy-*.*.*.vsix`.
