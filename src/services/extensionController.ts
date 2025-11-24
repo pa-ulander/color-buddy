@@ -395,32 +395,47 @@ export class ExtensionController implements vscode.Disposable {
 		const editorKey = this.getEditorKey(editor);
 		perfLogger.log('refreshEditor called for', editor.document.uri.fsPath);
 
-		// Skip if a refresh is already pending for this editor (debounce duplicate events)
-		if (this.stateManager.isRefreshPending(editorKey)) {
-			perfLogger.log('Skipping duplicate refresh for editor', editor.document.uri.fsPath);
-			return;
-		}
-
-		// Mark refresh as pending IMMEDIATELY to prevent race conditions
-		perfLogger.log('Marking refresh as pending for', editor.document.uri.fsPath);
-		this.stateManager.markRefreshPending(editorKey);
-
 		if (!this.shouldDecorate(editor.document)) {
 			this.clearDecorationsForEditor(editor);
-			// Clean up pending marker even if we're not decorating
-			this.stateManager.clearOldPendingRefreshes();
+			this.stateManager.cancelScheduledRefresh(editorKey);
 			return;
 		}
 
-		try {
-			const colorData = await this.ensureColorData(editor.document);
-			this.applyCSSVariableDecorations(editor, colorData);
-		} catch (error) {
-			console.error(`${LOG_PREFIX} failed to refresh color data`, error);
-		}
+		const targetVersion = editor.document.version;
+		const scheduledLabel = `refreshEditor.execute:${editorKey}`;
 
-		// Clean up old pending refresh markers periodically
-		this.stateManager.clearOldPendingRefreshes();
+		const run = async () => {
+			if (editor.document.version !== targetVersion) {
+				perfLogger.log('Skipping stale refresh for editor', editor.document.uri.fsPath);
+				return;
+			}
+
+			perfLogger.start(scheduledLabel);
+			const refreshStart = Date.now();
+
+			try {
+				const colorData = await this.ensureColorData(editor.document);
+				if (editor.document.version !== targetVersion) {
+					perfLogger.log('Document version changed during refresh, aborting apply', editor.document.uri.fsPath);
+					return;
+				}
+				this.applyCSSVariableDecorations(editor, colorData);
+			} catch (error) {
+				console.error(`${LOG_PREFIX} failed to refresh color data`, error);
+			} finally {
+				const duration = Date.now() - refreshStart;
+				this.stateManager.recordRefreshDuration(editorKey, duration);
+				const avg = this.stateManager.getAverageRefreshDuration(editorKey);
+				if (avg !== undefined) {
+					perfLogger.log('refreshEditor rolling average', { editor: editor.document.uri.fsPath, duration, avg });
+				} else {
+					perfLogger.log('refreshEditor duration', { editor: editor.document.uri.fsPath, duration });
+				}
+				perfLogger.end(scheduledLabel);
+			}
+		};
+
+		this.stateManager.scheduleRefresh(editorKey, targetVersion, run);
 	}
 
 	/**
@@ -629,6 +644,7 @@ export class ExtensionController implements vscode.Disposable {
 	 */
 	private clearColorCacheForDocument(document: vscode.TextDocument): void {
 		this.cache.delete(document.uri.toString());
+		this.stateManager.cancelScheduledRefresh(document.uri.toString());
 	}
 
 	/**
@@ -637,6 +653,7 @@ export class ExtensionController implements vscode.Disposable {
 	private clearDecorationsForEditor(editor: vscode.TextEditor): void {
 		this.clearColorCacheForDocument(editor.document);
 		const editorKey = this.getEditorKey(editor);
+		this.stateManager.cancelScheduledRefresh(editorKey);
 		this.stateManager.removeDecoration(editorKey);
 	}
 
