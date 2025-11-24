@@ -9,6 +9,7 @@ import {
 	COLOR_SWATCH_MARGIN,
 	COLOR_SWATCH_BORDER,
 	COLOR_SWATCH_CONTENT,
+	DECORATION_CHUNK_SIZE,
 	LOG_PREFIX
 } from '../utils/constants';
 import { perfLogger } from '../utils/performanceLogger';
@@ -473,15 +474,17 @@ export class ExtensionController implements vscode.Disposable {
 
 		await this.ensureDocumentIndexed(document);
 
-		const cached = this.cache.get(document.uri.toString(), document.version);
+		const cacheKey = document.uri.toString();
+		const version = document.version;
+
+		const cached = this.cache.get(cacheKey, version);
 		if (cached) {
 			perfLogger.log('Cache hit for document', document.uri.fsPath);
 			return cached;
 		}
 
 		perfLogger.log('Cache miss for document', document.uri.fsPath);
-		const key = `${document.uri.toString()}-${document.version}`;
-		return this.cache.getPendingOrCompute(key, async () => {
+		return this.cache.getPendingOrCompute(cacheKey, version, async () => {
 			perfLogger.start('computeColorData');
 			const data = await this.computeColorData(document);
 			this.cache.set(document.uri.toString(), document.version, data);
@@ -533,10 +536,12 @@ export class ExtensionController implements vscode.Disposable {
 	private applyCSSVariableDecorations(editor: vscode.TextEditor, colorData: ColorData[]): void {
 		perfLogger.start('applyCSSVariableDecorations');
 		const editorKey = this.getEditorKey(editor);
-		const existingDecoration = this.stateManager.getDecoration(editorKey);
-		if (existingDecoration) {
-			perfLogger.log('Disposing existing decoration for editor', editor.document.uri.fsPath);
-			existingDecoration.dispose();
+		const existingDecorations = this.stateManager.getDecoration(editorKey);
+		if (existingDecorations) {
+			perfLogger.log('Disposing existing decorations for editor', editor.document.uri.fsPath);
+			for (const decoration of existingDecorations) {
+				decoration.dispose();
+			}
 		}
 
 		const decorationRanges: vscode.Range[] = [];
@@ -563,17 +568,6 @@ export class ExtensionController implements vscode.Disposable {
 			return;
 		}
 
-		const decoration = vscode.window.createTextEditorDecorationType({
-			before: {
-				contentText: COLOR_SWATCH_CONTENT,
-				border: COLOR_SWATCH_BORDER,
-				width: `${COLOR_SWATCH_SIZE}px`,
-				height: `${COLOR_SWATCH_SIZE}px`,
-				margin: COLOR_SWATCH_MARGIN
-			},
-			backgroundColor: 'transparent'
-		});
-
 		const decorationRangesWithOptions = decorationRanges.map(range => {
 			const rangeKey = `${range.start.line}:${range.start.character}`;
 			const color = colorsByRange.get(rangeKey);
@@ -593,12 +587,28 @@ export class ExtensionController implements vscode.Disposable {
 		}).filter(item => item.renderOptions);
 
 		if (decorationRangesWithOptions.length > 0) {
+			const decorationsApplied: vscode.TextEditorDecorationType[] = [];
 			perfLogger.log('Applying decorations to editor', {
 				path: editor.document.uri.fsPath,
-				count: decorationRangesWithOptions.length
+				count: decorationRangesWithOptions.length,
+				chunks: Math.ceil(decorationRangesWithOptions.length / DECORATION_CHUNK_SIZE)
 			});
-			editor.setDecorations(decoration, decorationRangesWithOptions);
-			this.stateManager.setDecoration(editorKey, decoration);
+			for (let index = 0; index < decorationRangesWithOptions.length; index += DECORATION_CHUNK_SIZE) {
+				const chunk = decorationRangesWithOptions.slice(index, index + DECORATION_CHUNK_SIZE);
+				const decoration = vscode.window.createTextEditorDecorationType({
+					before: {
+						contentText: COLOR_SWATCH_CONTENT,
+						border: COLOR_SWATCH_BORDER,
+						width: `${COLOR_SWATCH_SIZE}px`,
+						height: `${COLOR_SWATCH_SIZE}px`,
+						margin: COLOR_SWATCH_MARGIN
+					},
+					backgroundColor: 'transparent'
+				});
+				editor.setDecorations(decoration, chunk);
+				decorationsApplied.push(decoration);
+			}
+			this.stateManager.setDecoration(editorKey, decorationsApplied);
 		} else {
 			perfLogger.log('No decorations to apply for editor', editor.document.uri.fsPath);
 		}

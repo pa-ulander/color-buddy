@@ -12,7 +12,7 @@ import type { ColorData, DocumentColorCache } from '../types';
  */
 export class Cache {
     private cache: Map<string, DocumentColorCache>;
-    private pending: Map<string, Promise<ColorData[]>>;
+    private pending: Map<string, { version: number; promise: Promise<ColorData[]> }>;
 
     constructor() {
         this.cache = new Map();
@@ -34,10 +34,12 @@ export class Cache {
      * Set color data cache for a document
      */
     set(uri: string, version: number, data: ColorData[]): void {
-        this.cache.set(uri, {
-            version,
-            data
-        });
+        const existing = this.cache.get(uri);
+        if (existing && existing.version > version) {
+            return;
+        }
+
+        this.cache.set(uri, { version, data });
     }
 
     /**
@@ -62,18 +64,24 @@ export class Cache {
      */
     getPendingOrCompute(
         key: string,
+        version: number,
         computation: () => Promise<ColorData[]>
     ): Promise<ColorData[]> {
         const existing = this.pending.get(key);
         if (existing) {
-            return existing;
+            if (existing.version >= version) {
+                return existing.promise;
+            }
         }
 
         const promise = computation().finally(() => {
-            this.pending.delete(key);
+            const current = this.pending.get(key);
+            if (current && current.promise === promise) {
+                this.pending.delete(key);
+            }
         });
 
-        this.pending.set(key, promise);
+        this.pending.set(key, { version, promise });
         return promise;
     }
 

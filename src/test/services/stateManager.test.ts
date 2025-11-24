@@ -25,26 +25,30 @@ suite('StateManager Service', () => {
 
         test('setDecoration stores decoration', () => {
             const decoration = vscode.window.createTextEditorDecorationType({});
-            stateManager.setDecoration('editor-1', decoration);
+            stateManager.setDecoration('editor-1', [decoration]);
 
             const result = stateManager.getDecoration('editor-1');
-            assert.strictEqual(result, decoration);
+            assert.ok(result);
+            assert.strictEqual(result?.length, 1);
+            assert.strictEqual(result?.[0], decoration);
         });
 
         test('setDecoration disposes old decoration when setting new one', () => {
             const decoration1 = vscode.window.createTextEditorDecorationType({});
             const decoration2 = vscode.window.createTextEditorDecorationType({});
 
-            stateManager.setDecoration('editor-1', decoration1);
-            stateManager.setDecoration('editor-1', decoration2);
+            stateManager.setDecoration('editor-1', [decoration1]);
+            stateManager.setDecoration('editor-1', [decoration2]);
 
             const result = stateManager.getDecoration('editor-1');
-            assert.strictEqual(result, decoration2);
+            assert.ok(result);
+            assert.strictEqual(result?.length, 1);
+            assert.strictEqual(result?.[0], decoration2);
         });
 
         test('removeDecoration disposes and removes decoration', () => {
             const decoration = vscode.window.createTextEditorDecorationType({});
-            stateManager.setDecoration('editor-1', decoration);
+            stateManager.setDecoration('editor-1', [decoration]);
 
             assert.strictEqual(stateManager.decorationCount, 1);
 
@@ -64,8 +68,8 @@ suite('StateManager Service', () => {
             const decoration1 = vscode.window.createTextEditorDecorationType({});
             const decoration2 = vscode.window.createTextEditorDecorationType({});
 
-            stateManager.setDecoration('editor-1', decoration1);
-            stateManager.setDecoration('editor-2', decoration2);
+            stateManager.setDecoration('editor-1', [decoration1]);
+            stateManager.setDecoration('editor-2', [decoration2]);
 
             assert.strictEqual(stateManager.decorationCount, 2);
 
@@ -79,10 +83,10 @@ suite('StateManager Service', () => {
         test('decorationCount returns correct count', () => {
             assert.strictEqual(stateManager.decorationCount, 0);
 
-            stateManager.setDecoration('editor-1', vscode.window.createTextEditorDecorationType({}));
+            stateManager.setDecoration('editor-1', [vscode.window.createTextEditorDecorationType({})]);
             assert.strictEqual(stateManager.decorationCount, 1);
 
-            stateManager.setDecoration('editor-2', vscode.window.createTextEditorDecorationType({}));
+            stateManager.setDecoration('editor-2', [vscode.window.createTextEditorDecorationType({})]);
             assert.strictEqual(stateManager.decorationCount, 2);
 
             stateManager.removeDecoration('editor-1');
@@ -179,8 +183,8 @@ suite('StateManager Service', () => {
 
     suite('Dispose', () => {
         test('dispose clears all decorations', () => {
-            stateManager.setDecoration('editor-1', vscode.window.createTextEditorDecorationType({}));
-            stateManager.setDecoration('editor-2', vscode.window.createTextEditorDecorationType({}));
+            stateManager.setDecoration('editor-1', [vscode.window.createTextEditorDecorationType({})]);
+            stateManager.setDecoration('editor-2', [vscode.window.createTextEditorDecorationType({})]);
 
             stateManager.dispose();
 
@@ -198,7 +202,7 @@ suite('StateManager Service', () => {
         });
 
         test('dispose can be called multiple times safely', () => {
-            stateManager.setDecoration('editor-1', vscode.window.createTextEditorDecorationType({}));
+            stateManager.setDecoration('editor-1', [vscode.window.createTextEditorDecorationType({})]);
 
             stateManager.dispose();
             stateManager.dispose();
@@ -213,8 +217,8 @@ suite('StateManager Service', () => {
             const decoration2 = vscode.window.createTextEditorDecorationType({});
             const sub1 = new vscode.Disposable(() => {});
 
-            stateManager.setDecoration('editor-1', decoration1);
-            stateManager.setDecoration('editor-2', decoration2);
+            stateManager.setDecoration('editor-1', [decoration1]);
+            stateManager.setDecoration('editor-2', [decoration2]);
             stateManager.addProviderSubscription(sub1);
             const uri = vscode.Uri.parse('file:///integration.css');
             stateManager.startNativeColorProbe(uri);
