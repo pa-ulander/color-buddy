@@ -130,7 +130,8 @@
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
-    "package-vsix": "npm run package && npx @vscode/vsce package"
+    "package-vsix": "npm run package && npx @vscode/vsce package",
+    "analyze-perf-log": "node scripts/analyze-perf-log.js"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
