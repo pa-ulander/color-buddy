@@ -3,6 +3,8 @@
 !img
 dist
 logs
+benchmarks/metrics/*.json
+benchmarks/metrics/*.md
 node_modules
 out
 src/backup
