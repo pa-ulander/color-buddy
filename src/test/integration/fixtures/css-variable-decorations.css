@@ -1,0 +1,13 @@
+:root {
+  --brand-primary: 210 85% 60%;
+  --brand-accent: 45 90% 55%;
+}
+
+.button {
+  color: var(--brand-primary);
+  background-color: var(--brand-accent);
+}
+
+.card-title {
+  color: var(--brand-accent);
+}

@@ -435,7 +435,7 @@ export class ExtensionController implements vscode.Disposable {
 			}
 		};
 
-		this.stateManager.scheduleRefresh(editorKey, targetVersion, run);
+		return this.stateManager.scheduleRefresh(editorKey, targetVersion, run);
 	}
 
 	/**
