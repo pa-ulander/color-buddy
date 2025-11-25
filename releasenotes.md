@@ -1,5 +1,35 @@
 # ColorBuddy Release Notes
 
+## Version 0.0.4 - Upcoming
+
+_Release date: to be announced._
+
+### PostCSS Coverage & Watcher Reliability
+
+This release completes the language override follow-ups and hardens our file-watcher story. PostCSS authors now get the same hover, decoration, and color picker experience as Sass/SCSS/LESS users—even when custom language IDs are involved—while our watcher integration keeps the registry accurate as files change on disk.
+
+### What Changed
+
+**PostCSS & Remapped Language Support**
+- Added dedicated `.pcss` fixtures plus integration tests so literal colors and CSS variables surface in PostCSS files.
+- Ensured remapped PostCSS, Sass, SCSS, and Less documents continue to emit colors by keying indexing off file extensions while native color providers stay language-ID aware.
+
+**Watcher Cleanup**
+- Expanded the CSS watcher integration test to cover create, change, and delete flows, verifying the registry refreshes without redundant parses.
+- Registry entries now clear immediately after source files are removed, preventing ghost hover entries or palette artifacts.
+
+**Test & Diagnostics Enhancements**
+- Broadened fixture-driven suites across default languages, Tailwind utilities, and CSS variable scenarios to guard against regressions.
+- Maintainer workflows now routinely produce performance traces and analyzer summaries, streamlining future tuning discussions.
+
+### Why This Matters
+
+Design systems rarely stick to default language IDs. Version 0.0.4 keeps ColorBuddy’s tooling consistent across remapped Sass/SCSS/LESS/PostCSS setups while ensuring filesystem churn never leaves stale variables behind. The additional integration coverage gives us confidence that future changes won’t silently regress cross-language support.
+
+### Upgrading
+
+Update from the VS Code marketplace (or `code --install-extension`). No configuration changes are required—new fixtures and watcher behavior apply automatically once the extension reloads.
+
 ---
 
 ## Version 0.0.3 - November 23, 2025

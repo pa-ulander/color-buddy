@@ -5,6 +5,26 @@ All notable changes to the **ColorBuddy** extension will be documented in this f
 ## [Unreleased]
 
 
+## [0.0.4] - Upcoming
+
+_Release date: to be announced._
+
+### Added
+- PostCSS support: `.pcss`/`.postcss` documents are now indexed and exposed through ColorBuddy’s hover and color provider pipelines, including custom language remaps.
+- Comprehensive fixture-driven coverage across the default language list, Tailwind utilities, and CSS variable scenarios to safeguard hover, decoration, and color picker behavior.
+- Watcher integration tests validating registry refresh on create/change events and cleanup on delete to prevent stale metadata.
+
+### Changed
+- Native color provider deferral now keys off language identifiers while CSS parsing keys off file extensions, ensuring remapped Sass/SCSS/LESS/PostCSS documents retain ColorBuddy features without duplicating native pickers.
+- Decoration scheduler improvements (chunk yields, pooling) keep refreshes responsive when large documents contain many CSS variable decorations.
+- Workflows now emit performance traces and analyzer reports directly through maintainer commands for easier diagnostics.
+
+### Fixed
+- File watcher delete events now remove CSS variables and classes from the registry immediately, eliminating ghost entries after files are renamed or removed.
+- Resolved stale cache scenarios through additional `ensureDocumentIndexed` guards so remapped documents re-parse only when versions change.
+- Tailwind, CSS variable, and literal color detections remain aligned after fixture migrations, preventing regressions when swapping sample assets.
+
+
 ## [0.0.3] - 2025-11-23
 
 ### Added
