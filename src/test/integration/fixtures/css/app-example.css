@@ -67,13 +67,13 @@
     @apply bg-background text-foreground;
   }
 
-  .plums {
+  .definition {
     color: var(--destructive);
   }
-  .plask {
+  .another-definition {
     color: var(--chart-3);
   }
-  .bonk {
+  .one-more-definition {
     color: var(--chart-4);
   }
   .hardcoded {

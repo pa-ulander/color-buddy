@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import type { ColorData, ColorFormat } from '../types';
 import { DEFAULT_LANGUAGES } from '../types';
 import {
@@ -37,6 +38,19 @@ const NATIVE_COLOR_PROVIDER_LANGUAGES = new Set([
 	'scss',
 	'less'
 ]);
+
+const CSS_LIKE_FILE_EXTENSIONS = new Set([
+	'.css',
+	'.scss',
+	'.sass',
+	'.less',
+	'.styl',
+	'.stylus',
+	'.pcss',
+	'.postcss'
+]);
+
+const SASS_FILE_EXTENSIONS = new Set(['.sass']);
 
 /**
  * Main extension controller managing lifecycle and coordination between services.
@@ -346,9 +360,9 @@ export class ExtensionController implements vscode.Disposable {
 				const colorData = await this.ensureColorData(document);
 
 				let allowedFormats: Set<ColorFormat> | undefined;
-				if (NATIVE_COLOR_PROVIDER_LANGUAGES.has(document.languageId)) {
+				if (this.isNativeColorProviderDocument(document)) {
 					allowedFormats = new Set<ColorFormat>(['tailwind']);
-				} else if (document.languageId === 'sass') {
+				} else if (this.isSassDocument(document)) {
 					allowedFormats = new Set<ColorFormat>(['tailwind', 'hsl', 'hsla']);
 				}
 
@@ -512,8 +526,43 @@ export class ExtensionController implements vscode.Disposable {
 		return allColorData;
 	}
 
+		private getDocumentExtension(document: vscode.TextDocument): string | undefined {
+			const fileName = document.fileName || document.uri.fsPath;
+			if (!fileName) {
+				return undefined;
+			}
+			const extension = path.extname(fileName);
+			return extension ? extension.toLowerCase() : undefined;
+		}
+
+		private isCssLikeDocument(document: vscode.TextDocument): boolean {
+			if (CSS_LIKE_LANGUAGES.has(document.languageId)) {
+				return true;
+			}
+			const extension = this.getDocumentExtension(document);
+			if (!extension) {
+				return false;
+			}
+			return CSS_LIKE_FILE_EXTENSIONS.has(extension);
+		}
+
+		private isNativeColorProviderDocument(document: vscode.TextDocument): boolean {
+			return NATIVE_COLOR_PROVIDER_LANGUAGES.has(document.languageId);
+		}
+
+		private isSassDocument(document: vscode.TextDocument): boolean {
+			if (document.languageId === 'sass') {
+				return true;
+			}
+			const extension = this.getDocumentExtension(document);
+			if (!extension) {
+				return false;
+			}
+			return SASS_FILE_EXTENSIONS.has(extension);
+		}
+
 	private async ensureDocumentIndexed(document: vscode.TextDocument): Promise<void> {
-		if (!CSS_LIKE_LANGUAGES.has(document.languageId)) {
+			if (!this.isCssLikeDocument(document)) {
 			return;
 		}
 
