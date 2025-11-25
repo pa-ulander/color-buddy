@@ -30,7 +30,7 @@ suite('SASS Document Colors', () => {
 			await controller.activate();
 
 			const extensionRoot = vscode.Uri.file(path.join(__dirname, '..', '..', '..'));
-			const uri = vscode.Uri.joinPath(extensionRoot, 'examples', 'example.sass');
+			const uri = vscode.Uri.joinPath(extensionRoot, 'src', 'test', 'integration', 'fixtures', 'sass', 'hsl-colors.sass');
 			const document = await vscode.workspace.openTextDocument(uri);
 
 			const colors = await vscode.commands.executeCommand<vscode.ColorInformation[]>(
