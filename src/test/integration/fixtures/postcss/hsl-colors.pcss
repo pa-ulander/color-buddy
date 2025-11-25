@@ -1,0 +1,14 @@
+@custom-media --viewport-medium (min-width: 50rem);
+
+:root {
+  --primary: hsl(205, 90%, 45%);
+  --secondary: hsla(42, 100%, 62%, 0.85);
+}
+
+@media (--viewport-medium) {
+  .button {
+    color: var(--primary);
+    background-color: var(--secondary);
+    border-color: rgb(15 23 42 / 0.9);
+  }
+}
