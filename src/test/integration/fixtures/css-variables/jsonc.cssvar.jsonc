@@ -1,0 +1,4 @@
+// css variable
+{
+  "color": "var(--primary-color)"
+}
