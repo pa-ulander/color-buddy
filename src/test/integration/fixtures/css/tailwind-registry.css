@@ -1,0 +1,8 @@
+:root {
+  --primary: #ff6600;
+  --accent: #3366ff;
+}
+
+.dark-theme {
+  --primary: #cc5200;
+}
