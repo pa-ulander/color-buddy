@@ -1,0 +1,8 @@
+:root {
+  --primary-color: #336699;
+  --secondary-color: rgb(255, 99, 71);
+}
+
+.theme-dark {
+  --primary-color: #112233;
+}
