@@ -1,4 +1,6 @@
 import * as assert from 'assert';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
 	createMockDocument,
@@ -12,8 +14,11 @@ import {
 	Cache,
 	Registry,
 	CSSParser,
-	ColorDetector
+	ColorDetector,
+	ExtensionController
 } from '../services';
+import { DEFAULT_LANGUAGES } from '../types';
+import { t, LocalizedStrings } from '../l10n/localization';
 
 // Create service instances for testing (matching the new architecture)
 const colorParser = new ColorParser();
@@ -146,6 +151,68 @@ suite('Language configuration', () => {
 		
 		assert.ok(Array.isArray(selector));
 		assert.deepStrictEqual(selector, [{ language: 'css' }, { language: 'scss' }]);
+	});
+});
+
+suite('Default language coverage', () => {
+	test('package.json default languages stay aligned with DEFAULT_LANGUAGES', () => {
+		const packageJsonPath = path.join(__dirname, '..', '..', 'package.json');
+		const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+		const contributedDefaults = packageJson?.contributes?.configuration?.properties?.['colorbuddy.languages']?.default;
+		assert.deepStrictEqual(contributedDefaults, DEFAULT_LANGUAGES, 'package.json default languages must match DEFAULT_LANGUAGES');
+	});
+
+	test('README documented defaults mirror DEFAULT_LANGUAGES', () => {
+		const readmePath = path.join(__dirname, '..', '..', 'README.md');
+		const readme = fs.readFileSync(readmePath, 'utf8');
+		const marker = '**Default languages include**';
+		const markerIndex = readme.indexOf(marker);
+		assert.ok(markerIndex >= 0, 'README should contain default languages marker');
+		const sectionEnd = readme.indexOf('Add or remove identifiers', markerIndex);
+		const section = sectionEnd >= 0
+			? readme.slice(markerIndex, sectionEnd)
+			: readme.slice(markerIndex);
+		const tokens = Array.from(section.matchAll(/`([^`]+)`/g)).map(match => match[1]);
+		const documented = [...new Set(tokens)].sort();
+		const expected = [...DEFAULT_LANGUAGES].sort();
+		assert.deepStrictEqual(documented, expected, 'README default language list must match DEFAULT_LANGUAGES');
+	});
+
+	test('ExtensionController decorates each DEFAULT_LANGUAGE by default', () => {
+		const restoreConfig = stubWorkspaceLanguages(DEFAULT_LANGUAGES);
+		const controller = new ExtensionController({ subscriptions: [] } as unknown as vscode.ExtensionContext);
+		const shouldDecorate = (controller as unknown as { shouldDecorate(document: vscode.TextDocument): boolean }).shouldDecorate.bind(controller);
+		try {
+			for (const language of DEFAULT_LANGUAGES) {
+				const doc = createMockDocument('', language);
+				assert.strictEqual(shouldDecorate(doc), true, `expected default language ${language} to be decorated`);
+			}
+			const unsupportedDoc = createMockDocument('', 'not-a-supported-language');
+			assert.strictEqual(shouldDecorate(unsupportedDoc), false, 'unexpected languages should not be decorated by default');
+		} finally {
+			controller.dispose();
+			restoreConfig();
+		}
+	});
+});
+
+suite('Default language literal pipeline', () => {
+	const sampleText = 'The brand color is #336699 and remains consistent.';
+	DEFAULT_LANGUAGES.forEach(language => {
+		test(`detects hover and color info in ${language}`, async () => {
+			const document = createMockDocument(sampleText, language);
+			const text = document.getText();
+			const colorData = colorDetector.collectColorData(document, text);
+			assert.ok(colorData.length > 0, `expected at least one color match for ${language}`);
+			const colorLiteral = colorData.find(data => document.getText(data.range) === '#336699');
+			assertDefined(colorLiteral, `expected literal #336699 for ${language}`);
+			const infos = provider.provideDocumentColors(colorData);
+			assert.ok(infos.length > 0, `expected color provider output for ${language}`);
+			const hover = await provider.provideHover(colorData, colorLiteral!.range.start);
+			assertDefined(hover, `expected hover for ${language}`);
+			const hoverContents = hover!.contents[0] as vscode.MarkdownString;
+			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_COLOR_PREVIEW)), `hover should include color preview heading for ${language}`);
+		});
 	});
 });
 
