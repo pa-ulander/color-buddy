@@ -7,3 +7,4 @@
 export * from './color';
 export * from './css';
 export * from './config';
+export * from './accessibility';
