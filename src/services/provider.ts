@@ -6,8 +6,10 @@ import { Registry } from './registry';
 import { Telemetry, buildContrastTelemetry, ColorInsightColorKind } from './telemetry';
 import { t, LocalizedStrings } from '../l10n/localization';
 import type { ColorFormat, AccessibilityReport, ColorData } from '../types';
-import { collectFormatConversions, getFormatLabel } from '../utils/colorFormatConversions';
+import { collectFormatConversions, appendFormatConversionList } from '../utils/colorFormatConversions';
 import { appendQuickActions } from '../utils/quickActions';
+import { getColorUsageCount } from '../utils/colorUsage';
+import { getColorInsights } from '../utils/colorInsights';
 
 /**
  * Provider service for VS Code language providers (hover, color provider).
@@ -121,16 +123,13 @@ export class Provider {
      */
     private appendFormatConversions(markdown: vscode.MarkdownString, color: vscode.Color, primaryFormat?: ColorFormat): void {
         const conversions = collectFormatConversions(this.colorParser, this.colorFormatter, color, primaryFormat);
-        if (conversions.length === 0) {
-            return;
-        }
+        appendFormatConversionList(markdown, conversions, { surface: 'hover' });
+    }
 
-        markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_FORMATS_AVAILABLE)}:**\n\n`);
-        for (const conversion of conversions) {
-            const label = getFormatLabel(conversion.format);
-            markdown.appendMarkdown(`- ${label}: \`${conversion.value}\`\n`);
-        }
-        markdown.appendMarkdown('\n');
+    private appendColorInsights(markdown: vscode.MarkdownString, color: vscode.Color): void {
+        const insights = getColorInsights(color);
+        markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_COLOR_NAME)}:** ${insights.name} (\`${insights.hex}\`)\n\n`);
+        markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_BRIGHTNESS)}:** ${insights.brightness}%\n\n`);
     }
 
     private appendMetricsSection(markdown: vscode.MarkdownString, usageCount: number, report: AccessibilityReport): void {
@@ -175,24 +174,6 @@ export class Provider {
         return 'literal';
     }
 
-    private getUsageIdentifier(data: ColorData): string {
-        if (data.isCssVariable && data.variableName) {
-            return `var:${data.variableName}`;
-        }
-        if (data.isTailwindClass && data.tailwindClass) {
-            return `tailwind:${data.tailwindClass}`;
-        }
-        if (data.isCssClass && data.cssClassName) {
-            return `class:${data.cssClassName}`;
-        }
-        return `color:${data.normalizedColor}`;
-    }
-
-    private getUsageCount(colorData: ColorData[], target: ColorData): number {
-        const identifier = this.getUsageIdentifier(target);
-        return colorData.filter(data => this.getUsageIdentifier(data) === identifier).length;
-    }
-
     /**
      * Create hover tooltip for CSS class colors
      */
@@ -215,6 +196,7 @@ export class Provider {
         markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_VALUE)}:** \`${declarations[0].value}\`\n\n`);
 
         this.appendFormatConversions(markdown, data.vscodeColor, data.format);
+        this.appendColorInsights(markdown, data.vscodeColor);
 
         markdown.appendMarkdown(`---\n\n`);
         
@@ -222,7 +204,7 @@ export class Provider {
             markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_DEFINED_IN)} [${vscode.workspace.asRelativePath(decl.uri)}:${decl.line + 1}](${decl.uri.toString()}#L${decl.line + 1})\n\n`);
         }
 
-        const usageCount = this.getUsageCount(colorData, data);
+        const usageCount = getColorUsageCount(colorData, data);
         const report = this.getAccessibilityReport(data.vscodeColor);
         this.recordHoverTelemetry(data, usageCount, report);
         this.appendMetricsSection(markdown, usageCount, report);
@@ -257,6 +239,7 @@ export class Provider {
             markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_MAPS_TO)}:** \`${data.variableName}\`\n\n`);
 
             this.appendFormatConversions(markdown, data.vscodeColor, data.format);
+            this.appendColorInsights(markdown, data.vscodeColor);
 
             markdown.appendMarkdown(`---\n\n`);
         } else {
@@ -276,6 +259,7 @@ export class Provider {
         if (!data.isTailwindClass) {
             markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_VARIABLE)}:** \`${data.variableName}\`\n\n`);
             this.appendFormatConversions(markdown, data.vscodeColor, data.format);
+            this.appendColorInsights(markdown, data.vscodeColor);
             markdown.appendMarkdown(`---\n\n`);
         }
         
@@ -318,7 +302,7 @@ export class Provider {
             markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_DEFINED_IN)} [${vscode.workspace.asRelativePath(darkDecl.uri)}:${darkDecl.line + 1}](${darkDecl.uri.toString()}#L${darkDecl.line + 1})\n\n`);
         }
 
-        const usageCount = this.getUsageCount(colorData, data);
+        const usageCount = getColorUsageCount(colorData, data);
         const report = this.getAccessibilityReport(data.vscodeColor);
         this.recordHoverTelemetry(data, usageCount, report);
         this.appendMetricsSection(markdown, usageCount, report);
@@ -365,8 +349,9 @@ export class Provider {
         markdown.appendMarkdown(`\n\n`);
 
         this.appendFormatConversions(markdown, data.vscodeColor, data.format);
+        this.appendColorInsights(markdown, data.vscodeColor);
 
-        const usageCount = this.getUsageCount(colorData, data);
+        const usageCount = getColorUsageCount(colorData, data);
         const report = this.getAccessibilityReport(data.vscodeColor);
         this.recordHoverTelemetry(data, usageCount, report);
         this.appendMetricsSection(markdown, usageCount, report);
