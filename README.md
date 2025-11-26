@@ -4,16 +4,17 @@
 
 ## ColorBuddy - Your VS Code Color Companion
 
-Adds color indicators and mouseover information anywhere a common color code is found in text or code. Find color definitions and navigate fast just like you are used to. Helps with theming or to manage cumbersome refactoring and accessability concerns. Finds defifnitions from CSS variables, Tailwind classes, and CSS class names with color properties.
+Adds color indicators and mouseover information anywhere a common color code is found in text or code. Find color definitions and navigate fast just like you are used to. Helps with theming or to manage cumbersome refactoring and accessability concerns. Finds defifnitions from CSS variables, Tailwind classes, and CSS class names with color properties. Plays nice together with other css and code related extensions.
 
-## Features
+## Latest New Features
 
-*   **Inline color indicator** right beside each detected color value
+*   **Inline color indicator** beside each detected color value
 *   **Mouseover preview** that shows the selected color and instructions
 *   **Native VS Code color picker** available on click for supported values
 *   **Configurable language support** via the `colorbuddy.languages` setting
-*   **Tailwind compact HSL support** in addition to hex, rgb/rgba, and hsl/hsla  
-
+*   **Tailwind compact HSL support** in addition to hex, rgb/rgba, and hsl/hsla and more  
+*   **Lightweight and performant** with caching and efficient parsing
+*   **accessibility testing** with contrast ratio info in the hover tooltip
 
 ![](img/screen1.png) 
  
@@ -22,8 +23,8 @@ Adds color indicators and mouseover information anywhere a common color code is 
 
 1.  Open any file in a language covered by `colorbuddy.languages` (defaults include CSS, HTML, JS/TS, Markdown, and more)
 2.  Look for the inline color indicator next to recognized color codes
-3.  Click the color value (or use the hover link) to launch VS Code's color picker
-4.  Choose a new color; ColorBuddy keeps the original format when possible
+3.  Hover over the color swatch or code to open vscode's tooltip and display color details
+4.  When hovering a color definition, the tooltip will contain VS Codes colorpicker enchanced with color information.
 
 ## Supported Color Formats
 
@@ -46,6 +47,23 @@ Adds color indicators and mouseover information anywhere a common color code is 
 ]
 ```
 
+*   `colorbuddy.enableTelemetry`: opt-in toggle that lets ColorBuddy record anonymous quick action usage metrics. Disabled by default; no telemetry is collected unless you enable this setting.
+
+### Telemetry endpoint & credentials
+
+ColorBuddy reads the telemetry destination and any required credentials from environment variables so nothing sensitive lives in your VS Code settings. Create a `.env` file alongside your workspace and add the following keys (or export them in your shell):
+
+```
+COLORBUDDY_TELEMETRY_ENDPOINT=https://your-api.example.com/colorbuddy/metrics
+COLORBUDDY_TELEMETRY_API_KEY=replace-with-api-key
+# Optional overrides
+# COLORBUDDY_TELEMETRY_API_KEY_HEADER=x-api-key
+# COLORBUDDY_TELEMETRY_USERNAME=service-account
+# COLORBUDDY_TELEMETRY_PASSWORD=replace-with-password
+```
+
+API keys are sent via the configured header (default `x-api-key`). If you provide both `COLORBUDDY_TELEMETRY_USERNAME` and `COLORBUDDY_TELEMETRY_PASSWORD`, ColorBuddy will fall back to HTTP Basic authentication instead. Update the `.env` file (or your environment variables) and reload VS Code whenever you rotate credentials.
+
 **Default languages include**
 
 *   **CSS/Styling**: `css`, `scss`, `sass`, `less`, `stylus`, `postcss`
@@ -65,7 +83,7 @@ Add or remove identifiers to fit your workspace. Use `"*"` to enable color detec
 
 *Install from VS Code Marketplace*
 
-Open VSCode and type `ctrl+p`, then type: `ext install PAUlander.colorbuddy`.
+Open VSCode and type `ctrl+p`, then type: `ext install PAUlander.colorbuddy`
 
 
 *Install from vsix binary*
