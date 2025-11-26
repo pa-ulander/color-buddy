@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { ExtensionController } from '../../services';
 import { perfLogger } from '../../utils/performanceLogger';
+import { t, LocalizedStrings } from '../../l10n/localization';
 import type { CSSVariableDeclaration } from '../../types';
 import { createMockDocument } from '../helpers';
 
@@ -58,6 +59,7 @@ suite('Command Integration', () => {
 		setQuickPickHandler(handler?: (items: readonly vscode.QuickPickItem[], options?: vscode.QuickPickOptions) => vscode.QuickPickItem | undefined | Promise<vscode.QuickPickItem | undefined>): void;
 		setTextSearchMatches(matches: vscode.TextSearchMatch[]): void;
 		getTextSearchInvocations(): Array<{ query: vscode.TextSearchQuery; options?: vscode.FindTextInFilesOptions }>;
+		setPerformanceLoggingEnabled(enabled: boolean): void;
 		restore(): Promise<void>;
 	}
 
@@ -359,13 +361,13 @@ suite('Command Integration', () => {
 			} as unknown as vscode.TextEditor;
 		}) as unknown as typeof vscode.window.showTextDocument;
 
-		perfLogger.clearMetrics();
+		perfLogger.reset();
 		perfLogger.updateEnabled();
 
 		const controller = new ExtensionController(context);
 		await controller.activate();
 
-		perfLogger.clearMetrics();
+		perfLogger.reset();
 
 		return {
 			controller,
@@ -402,9 +404,13 @@ suite('Command Integration', () => {
 				}
 			},
 			getTextSearchInvocations: () => [...textSearchInvocations],
+			setPerformanceLoggingEnabled: (enabled: boolean) => {
+				perfLoggingEnabled = enabled;
+				perfLogger.updateEnabled();
+			},
 			restore: async () => {
 				controller.dispose();
-				perfLogger.clearMetrics();
+				perfLogger.reset();
 				(vscode.commands as unknown as { registerCommand: typeof vscode.commands.registerCommand }).registerCommand = originalRegisterCommand;
 				(vscode.commands as unknown as { executeCommand: typeof vscode.commands.executeCommand }).executeCommand = originalExecuteCommand;
 				(vscode.workspace as unknown as { findFiles: typeof vscode.workspace.findFiles }).findFiles = originalFindFiles;
@@ -537,7 +543,7 @@ suite('Command Integration', () => {
 			const command = env.registeredCommands.get('colorbuddy.exportPerformanceLogs');
 			assert.ok(typeof command === 'function', 'Export performance logs command missing');
 
-			perfLogger.clearMetrics();
+			perfLogger.reset();
 			perfLogger.updateEnabled();
 			perfLogger.log('test-event', 'value');
 
@@ -549,6 +555,80 @@ suite('Command Integration', () => {
 			assert.ok((exported.content ?? '').includes('ColorBuddy Performance Logs'), 'Exported logs should include header');
 			assert.strictEqual(env.showTextDocuments.length, 1, 'Document should be shown to the user');
 			assert.ok(env.infoMessages.some(message => message.includes('Performance logs exported')), 'User should be notified about exported logs');
+		} finally {
+			await env.restore();
+		}
+	});
+
+	test('colorbuddy.capturePerformanceSnapshot prompts to enable logging when disabled', async () => {
+		const env = await setupCommandTestEnvironment({ perfLoggingEnabled: false, warningSelection: t(LocalizedStrings.COMMAND_PERF_ENABLE) });
+		try {
+			const command = env.registeredCommands.get('colorbuddy.capturePerformanceSnapshot');
+			assert.ok(typeof command === 'function', 'Capture performance snapshot command missing');
+
+			await (command as (...args: unknown[]) => unknown)();
+
+			assert.strictEqual(env.warningMessages.length, 1, 'Expected a single enable logging prompt');
+			assert.ok(env.configUpdates.some(update => update.name === 'enablePerformanceLogging' && update.value === true), 'Expected enablePerformanceLogging update');
+			assert.ok(env.infoMessages.some(message => message.includes('Performance logging enabled')), 'Expected informative message after enabling logging');
+			assert.strictEqual(env.openDocuments.length, 0, 'Should not open snapshot when enabling for the first time');
+			assert.strictEqual(env.showTextDocuments.length, 0, 'Should not display a document when just enabling logging');
+		} finally {
+			await env.restore();
+		}
+	});
+
+	test('colorbuddy.capturePerformanceSnapshot reports when no editors are visible', async () => {
+		const env = await setupCommandTestEnvironment({ perfLoggingEnabled: true });
+		try {
+			const command = env.registeredCommands.get('colorbuddy.capturePerformanceSnapshot');
+			assert.ok(typeof command === 'function', 'Capture performance snapshot command missing');
+
+			const initialInfoCount = env.infoMessages.length;
+			await (command as (...args: unknown[]) => unknown)();
+
+			const newMessages = env.infoMessages.slice(initialInfoCount);
+			const expected = t(LocalizedStrings.COMMAND_CAPTURE_PERF_NO_EDITORS);
+			assert.ok(newMessages.includes(expected), 'Expected guidance message when no editors are visible');
+			assert.strictEqual(env.openDocuments.length, 0, 'No snapshot document should open when there are no editors');
+		} finally {
+			await env.restore();
+		}
+	});
+
+	test('colorbuddy.capturePerformanceSnapshot refreshes visible editors and exports logs', async () => {
+		const env = await setupCommandTestEnvironment({ perfLoggingEnabled: true });
+		try {
+			const command = env.registeredCommands.get('colorbuddy.capturePerformanceSnapshot');
+			assert.ok(typeof command === 'function', 'Capture performance snapshot command missing');
+
+			const document = createMockDocument('body { color: #123456; }');
+			const selection = new vscode.Selection(new vscode.Position(0, 0), new vscode.Position(0, 0));
+			const editor = createEditor(document, selection);
+			env.setVisibleEditors([editor]);
+			env.setActiveEditor(editor);
+
+			const refreshCalls: vscode.TextEditor[] = [];
+			const controllerWithRefresh = env.controller as unknown as { refreshEditor: (editor: vscode.TextEditor) => Promise<void> };
+			controllerWithRefresh.refreshEditor = async (targetEditor: vscode.TextEditor) => {
+				refreshCalls.push(targetEditor);
+				perfLogger.log('test.refreshEditor', targetEditor.document.uri.toString());
+			};
+
+			perfLogger.reset();
+			perfLogger.updateEnabled();
+
+			const initialInfoCount = env.infoMessages.length;
+			await (command as (...args: unknown[]) => unknown)();
+
+			assert.strictEqual(refreshCalls.length, 1, 'Expected refreshEditor to run for each visible editor');
+			assert.strictEqual(env.openDocuments.length, 1, 'Expected a snapshot document to be created');
+			assert.strictEqual(env.showTextDocuments.length, 1, 'Snapshot document should be shown to the user');
+			const exported = env.openDocuments[0];
+			assert.ok((exported.content ?? '').includes('ColorBuddy Performance Logs'), 'Snapshot export should include the log header');
+			const newMessages = env.infoMessages.slice(initialInfoCount);
+			const expectedMessage = t(LocalizedStrings.COMMAND_CAPTURE_PERF_SUCCESS, 1);
+			assert.ok(newMessages.includes(expectedMessage), 'Expected success notification after capturing snapshot');
 		} finally {
 			await env.restore();
 		}
@@ -618,6 +698,23 @@ suite('Command Integration', () => {
 			assert.ok(request.items.some(item => item.label === '#336699'), 'Quick pick should include the hex representation');
 			const newMessages = env.infoMessages.slice(initialInfoCount);
 			assert.ok(newMessages.some(message => message.includes('#336699')), 'Success message should mention the copied value');
+		} finally {
+			await env.restore();
+		}
+	});
+
+	test('colorbuddy.copyColorAs copies provided payload without requiring editor context', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const command = env.registeredCommands.get('colorbuddy.copyColorAs');
+			assert.ok(typeof command === 'function', 'Copy color command missing');
+
+			const initialInfoCount = env.infoMessages.length;
+			await (command as (...args: unknown[]) => unknown)({ value: '#112233' });
+
+			assert.strictEqual(env.quickPickRequests.length, 0, 'Direct payload copy should not open a quick pick');
+			const newMessages = env.infoMessages.slice(initialInfoCount);
+			assert.ok(newMessages.some(message => message.includes('#112233')), 'Payload copy should acknowledge the copied value');
 		} finally {
 			await env.restore();
 		}
