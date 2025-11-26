@@ -61,12 +61,15 @@ export const LocalizedStrings = {
 	TOOLTIP_VARIABLE_NOT_FOUND_MESSAGE: 'This variable is not defined in any CSS files in the workspace.',
 	TOOLTIP_VARIABLE_NOT_FOUND_HINT: 'Make sure the variable is declared in a CSS file.',
 	TOOLTIP_COLOR_PREVIEW: 'Color Preview',
+	TOOLTIP_COLOR_NAME: 'Closest CSS color',
+	TOOLTIP_BRIGHTNESS: 'Perceptual brightness',
 	TOOLTIP_FORMAT_HEX: 'Hex',
 	TOOLTIP_FORMAT_RGBA: 'RGB/RGBA',
 	TOOLTIP_FORMAT_HSLA: 'HSL/HSLA',
 	TOOLTIP_FORMAT_TAILWIND_HSL: 'Tailwind HSL',
 	TOOLTIP_FORMAT_UNKNOWN: 'Unknown',
 	TOOLTIP_FORMATS_AVAILABLE: 'Available formats',
+	TOOLTIP_CLICK_TO_COPY: 'Click to copy',
 	TOOLTIP_FORMAT_HEX_ALPHA: 'Hex (with alpha)',
 	TOOLTIP_FORMAT_RGB_LABEL: 'RGB',
 	TOOLTIP_FORMAT_RGBA_LABEL: 'RGBA',
@@ -108,7 +111,16 @@ export const LocalizedStrings = {
 	COMMAND_TEST_ACCESSIBILITY_NO_EDITOR: 'Open a file to test color accessibility.',
 	COMMAND_TEST_ACCESSIBILITY_NO_COLOR: 'Place the cursor on a color before testing accessibility.',
 	COMMAND_TEST_ACCESSIBILITY_RESULTS: 'Accessibility for {0}:\n{1}',
-	COMMAND_TEST_ACCESSIBILITY_ERROR: 'Failed to evaluate color accessibility. Check the logs for details.'
+	COMMAND_TEST_ACCESSIBILITY_ERROR: 'Failed to evaluate color accessibility. Check the logs for details.',
+	COMMAND_PERF_LOGGING_DISABLED: 'Performance logging is currently disabled. Enable it to start collecting metrics.',
+	COMMAND_PERF_ENABLE: 'Enable Logging',
+	COMMAND_PERF_CANCEL: 'Cancel',
+	COMMAND_PERF_ENABLED_MESSAGE: 'Performance logging enabled. Exercise the workspace, then rerun the command.',
+	COMMAND_EXPORT_PERF_SUCCESS: 'Performance logs exported. Save this file to share or analyze the logs.',
+	COMMAND_EXPORT_PERF_ERROR: 'Failed to export performance logs. Check the logs for details.',
+	COMMAND_CAPTURE_PERF_NO_EDITORS: 'Open at least one file to capture a performance snapshot.',
+	COMMAND_CAPTURE_PERF_SUCCESS: 'Performance snapshot captured across {0} editor(s). Review the opened document for details.',
+	COMMAND_CAPTURE_PERF_ERROR: 'Failed to capture a performance snapshot. Check the logs for details.'
 } as const;
 
 export type LocalizedMessage = typeof LocalizedStrings[keyof typeof LocalizedStrings];
