@@ -58,6 +58,10 @@
         "title": "ColorBuddy: Export Performance Logs"
       },
       {
+        "command": "colorbuddy.capturePerformanceSnapshot",
+        "title": "ColorBuddy: Capture Performance Snapshot"
+      },
+      {
         "command": "colorbuddy.copyColorAs",
         "title": "ColorBuddy: Copy Color As..."
       },
