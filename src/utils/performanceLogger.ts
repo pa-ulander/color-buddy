@@ -110,6 +110,16 @@ export class PerformanceLogger {
 	 */
 	clearMetrics(): void {
 		this.metrics.clear();
+		this.timers.clear();
+	}
+
+	/**
+	 * Reset timers, metrics, and event log entries.
+	 */
+	reset(): void {
+		this.timers.clear();
+		this.metrics.clear();
+		this.eventLog = [];
 	}
 
 	/**
