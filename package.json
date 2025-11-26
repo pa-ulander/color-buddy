@@ -56,6 +56,26 @@
       {
         "command": "colorbuddy.exportPerformanceLogs",
         "title": "ColorBuddy: Export Performance Logs"
+      },
+      {
+        "command": "colorbuddy.copyColorAs",
+        "title": "ColorBuddy: Copy Color As..."
+      },
+      {
+        "command": "colorbuddy.findColorUsages",
+        "title": "ColorBuddy: Find Color Usages"
+      },
+      {
+        "command": "colorbuddy.testColorAccessibility",
+        "title": "ColorBuddy: Test Color Accessibility"
+      },
+      {
+        "command": "colorbuddy.convertColorFormat",
+        "title": "ColorBuddy: Convert Color Format"
+      },
+      {
+        "command": "colorbuddy.executeQuickAction",
+        "title": "ColorBuddy: Execute Quick Action"
       }
     ],
     "configuration": {
@@ -116,6 +136,17 @@
           "type": "boolean",
           "description": "Enable detailed performance logging for diagnostics. Logs timing information for indexing, caching, and hover operations to the Output panel.",
           "default": false
+        },
+        "colorbuddy.enableTelemetry": {
+          "type": "boolean",
+          "description": "Allow ColorBuddy to collect anonymous quick action usage telemetry. Disabled by default.",
+          "default": false
+        },
+        "colorbuddy.telemetryBatchSize": {
+          "type": "number",
+          "description": "Number of telemetry events to batch before sending to the endpoint.",
+          "default": 20,
+          "minimum": 1
         }
       }
     }
@@ -148,6 +179,7 @@
     "webpack-cli": "^6.0.1"
   },
   "dependencies": {
-    "@vscode/l10n": "^0.0.18"
+    "@vscode/l10n": "^0.0.18",
+    "dotenv": "^16.4.5"
   }
 }
