@@ -8,3 +8,4 @@ benchmarks/metrics/*.md
 node_modules
 out
 src/backup
+.env
