@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import type { AccessibilityReport, ColorData, ColorFormat } from '../types';
+import type { AccessibilityReport, ColorData, ColorFormat, CopyColorCommandPayload } from '../types';
 import { DEFAULT_LANGUAGES } from '../types';
 import {
 	MAX_CSS_FILES,
@@ -24,9 +24,12 @@ import { ColorFormatter } from './colorFormatter';
 import { ColorDetector } from './colorDetector';
 import { CSSParser } from './cssParser';
 import { Provider } from './provider';
-import { collectFormatConversions, getFormatLabel } from '../utils/colorFormatConversions';
+import { collectFormatConversions, getFormatLabel, appendFormatConversionList } from '../utils/colorFormatConversions';
+import type { FormatConversion } from '../utils/colorFormatConversions';
 import { appendQuickActions, EXECUTE_QUICK_ACTION_COMMAND, QuickActionLinkPayload } from '../utils/quickActions';
 import { Telemetry, buildContrastTelemetry, ColorInsightColorKind } from './telemetry';
+import { getColorUsageCount } from '../utils/colorUsage';
+import { getColorInsights } from '../utils/colorInsights';
 
 const CSS_LIKE_LANGUAGES = new Set([
 	'css',
@@ -215,7 +218,8 @@ export class ExtensionController implements vscode.Disposable {
 			vscode.commands.registerCommand('colorbuddy.reindexCSSFiles', () => this.handleReindexCommand()),
 			vscode.commands.registerCommand('colorbuddy.showColorPalette', () => this.handleShowPaletteCommand()),
 			vscode.commands.registerCommand('colorbuddy.exportPerformanceLogs', () => this.handleExportLogsCommand()),
-			vscode.commands.registerCommand('colorbuddy.copyColorAs', () => this.handleCopyColorCommand()),
+			vscode.commands.registerCommand('colorbuddy.capturePerformanceSnapshot', () => this.handleCapturePerformanceSnapshotCommand()),
+			vscode.commands.registerCommand('colorbuddy.copyColorAs', (payload?: CopyColorCommandPayload) => this.handleCopyColorCommand(payload)),
 			vscode.commands.registerCommand('colorbuddy.findColorUsages', () => this.handleFindColorUsagesCommand()),
 			vscode.commands.registerCommand('colorbuddy.testColorAccessibility', () => this.handleTestAccessibilityCommand()),
 			vscode.commands.registerCommand('colorbuddy.convertColorFormat', () => this.handleConvertColorFormatCommand()),
@@ -267,7 +271,20 @@ export class ExtensionController implements vscode.Disposable {
 		}
 	}
 
-	private async handleCopyColorCommand(): Promise<void> {
+	private async handleCopyColorCommand(payload?: CopyColorCommandPayload): Promise<void> {
+		if (payload && typeof payload === 'object' && typeof payload.value === 'string') {
+			try {
+				await vscode.env.clipboard.writeText(payload.value);
+				if (payload.showNotification !== false) {
+					await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_COPY_COLOR_SUCCESS, payload.value));
+				}
+			} catch (error) {
+				console.error(`${LOG_PREFIX} failed to copy color payload value`, error);
+				await vscode.window.showErrorMessage(t(LocalizedStrings.COMMAND_COPY_COLOR_ERROR));
+			}
+			return;
+		}
+
 		const editor = vscode.window.activeTextEditor;
 		if (!editor) {
 			await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_COPY_COLOR_NO_EDITOR));
@@ -477,6 +494,65 @@ export class ExtensionController implements vscode.Disposable {
 		}
 	}
 
+	private async ensurePerformanceLoggingEnabled(): Promise<boolean> {
+		if (perfLogger.isEnabled()) {
+			return true;
+		}
+
+		const selection = await vscode.window.showWarningMessage(
+			t(LocalizedStrings.COMMAND_PERF_LOGGING_DISABLED),
+			t(LocalizedStrings.COMMAND_PERF_ENABLE),
+			t(LocalizedStrings.COMMAND_PERF_CANCEL)
+		);
+
+		if (selection !== t(LocalizedStrings.COMMAND_PERF_ENABLE)) {
+			return false;
+		}
+
+		const config = vscode.workspace.getConfiguration('colorbuddy');
+		await config.update('enablePerformanceLogging', true, vscode.ConfigurationTarget.Global);
+		perfLogger.updateEnabled();
+		await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_PERF_ENABLED_MESSAGE));
+		return false;
+	}
+
+	private async handleCapturePerformanceSnapshotCommand(): Promise<void> {
+		try {
+			const ready = await this.ensurePerformanceLoggingEnabled();
+			if (!ready) {
+				return;
+			}
+
+			const editors = vscode.window.visibleTextEditors;
+			if (editors.length === 0) {
+				await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_CAPTURE_PERF_NO_EDITORS));
+				return;
+			}
+
+			perfLogger.reset();
+			perfLogger.log('capturePerformanceSnapshot:start', { editors: editors.length });
+
+			const results = await Promise.allSettled(editors.map(editor => this.refreshEditor(editor)));
+			const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+			for (const failure of failures) {
+				console.error(`${LOG_PREFIX} failed to refresh editor during performance snapshot`, failure.reason);
+			}
+
+			perfLogger.log('capturePerformanceSnapshot:completed', {
+				editors: editors.length,
+				failures: failures.length
+			});
+			perfLogger.logSummary();
+			const content = perfLogger.exportLogs();
+			const document = await vscode.workspace.openTextDocument({ content, language: 'markdown' });
+			await vscode.window.showTextDocument(document, { preview: false });
+			await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_CAPTURE_PERF_SUCCESS, editors.length));
+		} catch (error) {
+			console.error(`${LOG_PREFIX} failed to capture performance snapshot`, error);
+			await vscode.window.showErrorMessage(t(LocalizedStrings.COMMAND_CAPTURE_PERF_ERROR));
+		}
+	}
+
 	private async handleExecuteQuickActionCommand(payload?: QuickActionLinkPayload): Promise<void> {
 		if (!payload || typeof payload.target !== 'string') {
 			console.warn(`${LOG_PREFIX} quick action invoked without a valid target`, payload);
@@ -507,35 +583,21 @@ export class ExtensionController implements vscode.Disposable {
 	 * Handle export performance logs command.
 	 */
 	private async handleExportLogsCommand(): Promise<void> {
-		if (!perfLogger.isEnabled()) {
-			const enable = await vscode.window.showWarningMessage(
-				'Performance logging is currently disabled. Enable it to start collecting logs.',
-				'Enable Logging',
-				'Cancel'
-			);
-			if (enable === 'Enable Logging') {
-				const config = vscode.workspace.getConfiguration('colorbuddy');
-				await config.update('enablePerformanceLogging', true, vscode.ConfigurationTarget.Global);
-				perfLogger.updateEnabled();
-				await vscode.window.showInformationMessage(
-					'Performance logging enabled. Use the extension normally, then run this command again to export logs.'
-				);
+		try {
+			const ready = await this.ensurePerformanceLoggingEnabled();
+			if (!ready) {
+				return;
 			}
-			return;
-		}
 
-		const logContent = perfLogger.exportLogs();
-		
-		// Create a new untitled document with the logs
-		const doc = await vscode.workspace.openTextDocument({
-			content: logContent,
-			language: 'plaintext'
-		});
-		
-		await vscode.window.showTextDocument(doc);
-		await vscode.window.showInformationMessage(
-			'Performance logs exported. Save this file to share or analyze the logs.'
-		);
+			perfLogger.logSummary();
+			const content = perfLogger.exportLogs();
+			const document = await vscode.workspace.openTextDocument({ content, language: 'markdown' });
+			await vscode.window.showTextDocument(document, { preview: false });
+			await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_EXPORT_PERF_SUCCESS));
+		} catch (error) {
+			console.error(`${LOG_PREFIX} failed to export performance logs`, error);
+			await vscode.window.showErrorMessage(t(LocalizedStrings.COMMAND_EXPORT_PERF_ERROR));
+		}
 	}
 
 	/**
@@ -1205,7 +1267,8 @@ export class ExtensionController implements vscode.Disposable {
 		data: ColorData,
 		primaryValue: string,
 		metrics: StatusBarMetrics,
-		report: AccessibilityReport
+		report: AccessibilityReport,
+		conversions: FormatConversion[]
 	): vscode.MarkdownString {
 		const markdown = new vscode.MarkdownString('', true);
 		markdown.supportHtml = true;
@@ -1223,6 +1286,9 @@ export class ExtensionController implements vscode.Disposable {
 
 		markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_COLOR)}:** \`${primaryValue}\`\n\n`);
 		markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_NORMALIZED)}:** \`${data.normalizedColor}\`\n\n`);
+		const insights = getColorInsights(data.vscodeColor);
+		markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_COLOR_NAME)}:** ${insights.name} (\`${insights.hex}\`)\n\n`);
+		markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_BRIGHTNESS)}:** ${insights.brightness}%\n\n`);
 		markdown.appendMarkdown(`**${t(LocalizedStrings.STATUS_BAR_USAGE_COUNT)}:** ${metrics.usageCount}\n\n`);
 
 		markdown.appendMarkdown(`**${t(LocalizedStrings.STATUS_BAR_CONTRAST_SUMMARY)}:**\n\n`);
@@ -1231,15 +1297,7 @@ export class ExtensionController implements vscode.Disposable {
 		}
 		markdown.appendMarkdown('\n');
 
-		const conversions = collectFormatConversions(this.colorParser, this.colorFormatter, data.vscodeColor, data.format);
-		if (conversions.length > 0) {
-			markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_FORMATS_AVAILABLE)}:**\n\n`);
-			for (const conversion of conversions) {
-				const label = getFormatLabel(conversion.format);
-				markdown.appendMarkdown(`- ${label}: \`${conversion.value}\`\n`);
-			}
-			markdown.appendMarkdown('\n');
-		}
+		appendFormatConversionList(markdown, conversions, { surface: 'statusBar' });
 
 		appendQuickActions(markdown, { surface: 'statusBar' });
 
@@ -1273,7 +1331,7 @@ export class ExtensionController implements vscode.Disposable {
 
 			const conversions = collectFormatConversions(this.colorParser, this.colorFormatter, activeColor.vscodeColor, activeColor.format);
 			const primary = conversions[0]?.value ?? activeColor.normalizedColor;
-			const usageCount = this.getUsageCount(colorData, activeColor);
+			const usageCount = getColorUsageCount(colorData, activeColor);
 			const accessibilityReport = this.provider.getAccessibilityReport(activeColor.vscodeColor);
 			const contrastMetrics = this.extractContrastMetrics(accessibilityReport);
 			const metrics: StatusBarMetrics = {
@@ -1284,7 +1342,7 @@ export class ExtensionController implements vscode.Disposable {
 			this.recordStatusBarTelemetry(activeColor, usageCount, accessibilityReport);
 			const text = this.getStatusBarText(activeColor, primary, metrics);
 			this.statusBarItem.text = text;
-			this.statusBarItem.tooltip = this.buildStatusBarTooltip(activeColor, primary, metrics, accessibilityReport);
+			this.statusBarItem.tooltip = this.buildStatusBarTooltip(activeColor, primary, metrics, accessibilityReport, conversions);
 			this.statusBarItem.show();
 		} catch (error) {
 			console.error(`${LOG_PREFIX} failed to update status bar`, error);
@@ -1332,24 +1390,6 @@ export class ExtensionController implements vscode.Disposable {
 			return 'cssClass';
 		}
 		return 'literal';
-	}
-
-	private getUsageCount(colorData: ColorData[], target: ColorData): number {
-		const identifier = this.getUsageIdentifier(target);
-		return colorData.filter(data => this.getUsageIdentifier(data) === identifier).length;
-	}
-
-	private getUsageIdentifier(data: ColorData): string {
-		if (data.isCssVariable && data.variableName) {
-			return `var:${data.variableName}`;
-		}
-		if (data.isTailwindClass && data.tailwindClass) {
-			return `tailwind:${data.tailwindClass}`;
-		}
-		if (data.isCssClass && data.cssClassName) {
-			return `class:${data.cssClassName}`;
-		}
-		return `color:${data.normalizedColor}`;
 	}
 
 	/**
