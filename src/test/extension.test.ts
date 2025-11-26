@@ -17,7 +17,9 @@ import {
 	ColorDetector,
 	ExtensionController
 } from '../services';
+import { Telemetry, QuickActionTelemetryEvent, ColorInsightTelemetryEvent } from '../services/telemetry';
 import { DEFAULT_LANGUAGES } from '../types';
+import type { AccessibilityReport } from '../types';
 import { t, LocalizedStrings } from '../l10n/localization';
 
 // Create service instances for testing (matching the new architecture)
@@ -212,6 +214,168 @@ suite('Default language literal pipeline', () => {
 			assertDefined(hover, `expected hover for ${language}`);
 			const hoverContents = hover!.contents[0] as vscode.MarkdownString;
 			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_COLOR_PREVIEW)), `hover should include color preview heading for ${language}`);
+			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_FORMATS_AVAILABLE)), `hover should list additional formats for ${language}`);
+				assert.ok(hoverContents.value.includes(t(LocalizedStrings.STATUS_BAR_USAGE_COUNT)), `hover should surface usage count for ${language}`);
+				assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_ACCESSIBILITY)), `hover should surface accessibility header for ${language}`);
+				assert.ok(hoverContents.value.includes('AAA ('), `hover should enumerate accessibility passes for ${language}`);
+				assert.ok(hoverContents.value.includes(t(LocalizedStrings.STATUS_BAR_CONTRAST_SUMMARY)), `hover should surface contrast summary header for ${language}`);
+				assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_CONTRAST_ON_WHITE)), `hover should list contrast on white for ${language}`);
+				assert.ok(/Contrast on white: [\d\.]+:1/.test(hoverContents.value), `hover should surface contrast ratio details for ${language}`);
+			assert.ok(hoverContents.value.includes(t(LocalizedStrings.COMMAND_QUICK_ACTIONS_TITLE)), `hover should include quick actions heading for ${language}`);
+			assert.ok(hoverContents.value.includes('command:colorbuddy.executeQuickAction'), `hover should route quick actions through execute command for ${language}`);
+			const hoverLinkMatch = hoverContents.value.match(/command:colorbuddy\.executeQuickAction\?([^\)\]]+)/);
+			assertDefined(hoverLinkMatch, `expected quick action link payload for ${language}`);
+			const hoverPayload = JSON.parse(decodeURIComponent(hoverLinkMatch![1]));
+			assert.strictEqual(hoverPayload.target, 'colorbuddy.copyColorAs', `hover quick action should target copy command for ${language}`);
+			assert.strictEqual(hoverPayload.source, 'hover', `hover quick action should mark hover surface for ${language}`);
+			assert.ok(hoverContents.value.includes('colorbuddy.findColorUsages'), `hover quick actions should include find usages for ${language}`);
+			assert.ok(hoverContents.value.includes('colorbuddy.showColorPalette'), `hover quick actions should include palette for ${language}`);
+		});
+	});
+
+		suite('Status bar quick actions', () => {
+			test('status bar tooltip includes quick action links', () => {
+			const restoreConfig = stubWorkspaceLanguages(['plaintext']);
+			const controller = new ExtensionController({ subscriptions: [] } as unknown as vscode.ExtensionContext);
+			try {
+				const document = createMockDocument('#123456', 'plaintext');
+				const colorData = colorDetector.collectColorData(document, document.getText());
+				assert.ok(colorData.length > 0, 'expected at least one color for status bar test');
+					const buildTooltip = (controller as unknown as {
+						buildStatusBarTooltip(data: any, primaryValue: string, metrics: any, report: AccessibilityReport): vscode.MarkdownString;
+					}).buildStatusBarTooltip.bind(controller);
+					const providerInstance = (controller as unknown as { provider: Provider }).provider;
+					const report = providerInstance.getAccessibilityReport(colorData[0].vscodeColor);
+					const contrastMetrics = (controller as unknown as {
+						extractContrastMetrics(report: AccessibilityReport): { contrastWhite?: any; contrastBlack?: any };
+					}).extractContrastMetrics.call(controller, report);
+					const tooltip = buildTooltip(
+						colorData[0],
+						colorData[0].normalizedColor,
+						{
+							usageCount: 1,
+							contrastWhite: contrastMetrics.contrastWhite,
+							contrastBlack: contrastMetrics.contrastBlack
+						},
+						report
+					);
+				assert.ok(tooltip.value.includes(t(LocalizedStrings.COMMAND_QUICK_ACTIONS_TITLE)), 'status bar tooltip should include quick actions header');
+				assert.ok(tooltip.value.includes('command:colorbuddy.executeQuickAction'), 'status bar quick actions should route through execute command');
+				const linkMatch = tooltip.value.match(/command:colorbuddy\.executeQuickAction\?([^\)\]]+)/);
+				assertDefined(linkMatch, 'status bar quick action payload should be present');
+				const payload = JSON.parse(decodeURIComponent(linkMatch![1]));
+				assert.strictEqual(payload.target, 'colorbuddy.copyColorAs', 'status bar quick action should include copy command link');
+				assert.strictEqual(payload.source, 'statusBar', 'status bar quick action payload should mark the surface');
+				assert.ok(tooltip.value.includes('colorbuddy.findColorUsages'), 'status bar quick actions should include find usages command');
+				assert.ok(tooltip.value.includes('colorbuddy.showColorPalette'), 'status bar quick actions should include palette command');
+				assert.strictEqual(tooltip.isTrusted, true, 'status bar tooltip must be trusted to enable command links');
+			} finally {
+				controller.dispose();
+				restoreConfig();
+			}
+		});
+	});
+
+	suite('Quick action command', () => {
+		test('tracks quick action telemetry when opt-in is enabled', async () => {
+			const restoreConfig = stubWorkspaceLanguages(['plaintext'], { enableTelemetry: true });
+			const events: QuickActionTelemetryEvent[] = [];
+			const telemetry = new Telemetry({ onQuickActionRecorded: event => events.push(event) });
+			const controller = new ExtensionController({ subscriptions: [] } as unknown as vscode.ExtensionContext, { telemetry });
+			const restoreCommand = stubExecuteCommand(undefined);
+			try {
+				const executeQuickAction = (controller as unknown as {
+					handleExecuteQuickActionCommand(payload?: any): Promise<void>;
+				}).handleExecuteQuickActionCommand.bind(controller);
+				await executeQuickAction({ target: 'colorbuddy.copyColorAs', source: 'hover' });
+				assert.strictEqual(events.length, 1, 'telemetry should record quick action when enabled');
+				assert.strictEqual(events[0].target, 'colorbuddy.copyColorAs');
+				assert.strictEqual(events[0].source, 'hover');
+			} finally {
+				restoreCommand();
+				controller.dispose();
+				restoreConfig();
+			}
+		});
+
+		test('does not record telemetry when opt-in is disabled', async () => {
+			const restoreConfig = stubWorkspaceLanguages(['plaintext'], { enableTelemetry: false });
+			const events: QuickActionTelemetryEvent[] = [];
+			const telemetry = new Telemetry({ onQuickActionRecorded: event => events.push(event) });
+			const controller = new ExtensionController({ subscriptions: [] } as unknown as vscode.ExtensionContext, { telemetry });
+			const restoreCommand = stubExecuteCommand(undefined);
+			try {
+				const executeQuickAction = (controller as unknown as {
+					handleExecuteQuickActionCommand(payload?: any): Promise<void>;
+				}).handleExecuteQuickActionCommand.bind(controller);
+				await executeQuickAction({ target: 'colorbuddy.copyColorAs', source: 'statusBar' });
+				assert.strictEqual(events.length, 0, 'telemetry should remain silent when disabled');
+			} finally {
+				restoreCommand();
+				controller.dispose();
+				restoreConfig();
+			}
+		});
+	});
+
+	suite('Color insight telemetry', () => {
+		test('hover emits metrics when telemetry is enabled', async () => {
+			const restoreConfig = stubWorkspaceLanguages(['plaintext'], { enableTelemetry: true });
+			const events: ColorInsightTelemetryEvent[] = [];
+			const telemetry = new Telemetry({ onColorInsightRecorded: event => events.push(event) });
+			const instrumentedProvider = new Provider(registry, colorParser, colorFormatter, cssParser, telemetry);
+			try {
+				const document = createMockDocument('#123456', 'plaintext');
+				const colorData = colorDetector.collectColorData(document, document.getText());
+				const hover = await instrumentedProvider.provideHover(colorData, colorData[0].range.start);
+				assertDefined(hover, 'expected hover result');
+				assert.strictEqual(events.length, 1, 'telemetry should record hover metrics');
+				assert.strictEqual(events[0].surface, 'hover');
+				assert.strictEqual(events[0].colorKind, 'literal');
+				assert.strictEqual(events[0].usageCount, 1);
+				assert.strictEqual(events[0].contrast.length, 2);
+			} finally {
+				restoreConfig();
+			}
+		});
+
+		test('status bar emits metrics when telemetry is enabled', () => {
+			const restoreConfig = stubWorkspaceLanguages(['plaintext'], { enableTelemetry: true });
+			const events: ColorInsightTelemetryEvent[] = [];
+			const telemetry = new Telemetry({ onColorInsightRecorded: event => events.push(event) });
+			const controller = new ExtensionController({ subscriptions: [] } as unknown as vscode.ExtensionContext, { telemetry });
+			try {
+				const document = createMockDocument('#abcdef', 'plaintext');
+				const colorData = colorDetector.collectColorData(document, document.getText());
+				assert.ok(colorData.length > 0, 'expected color data for status bar telemetry test');
+				const report = provider.getAccessibilityReport(colorData[0].vscodeColor);
+				const recordStatusTelemetry = (controller as unknown as {
+					recordStatusBarTelemetry(data: any, usageCount: number, report: AccessibilityReport): void;
+				}).recordStatusBarTelemetry.bind(controller);
+				recordStatusTelemetry(colorData[0], 1, report);
+				assert.strictEqual(events.length, 1, 'telemetry should record status bar metrics');
+				assert.strictEqual(events[0].surface, 'statusBar');
+				assert.strictEqual(events[0].usageCount, 1);
+				assert.strictEqual(events[0].contrast.length, 2);
+			} finally {
+				controller.dispose();
+				restoreConfig();
+			}
+		});
+
+		test('color insight telemetry respects opt-out', async () => {
+			const restoreConfig = stubWorkspaceLanguages(['plaintext'], { enableTelemetry: false });
+			const events: ColorInsightTelemetryEvent[] = [];
+			const telemetry = new Telemetry({ onColorInsightRecorded: event => events.push(event) });
+			const instrumentedProvider = new Provider(registry, colorParser, colorFormatter, cssParser, telemetry);
+			try {
+				const document = createMockDocument('#654321', 'plaintext');
+				const colorData = colorDetector.collectColorData(document, document.getText());
+				await instrumentedProvider.provideHover(colorData, colorData[0].range.start);
+				assert.strictEqual(events.length, 0, 'telemetry should stay silent when disabled');
+			} finally {
+				restoreConfig();
+			}
 		});
 	});
 });
@@ -279,12 +443,22 @@ function stubExecuteCommand<T>(result: T): () => void {
 	};
 }
 
-function stubWorkspaceLanguages(languages: string[]): () => void {
+interface WorkspaceConfigOverrides {
+	enableTelemetry?: boolean;
+}
+
+function stubWorkspaceLanguages(languages: string[], overrides?: WorkspaceConfigOverrides): () => void {
 	const original = vscode.workspace.getConfiguration;
 	const config: vscode.WorkspaceConfiguration = {
 		get: <T>(section: string, defaultValue?: T) => {
 			if (section === 'languages') {
 				return languages as unknown as T;
+			}
+			if (section === 'enableTelemetry') {
+				if (typeof overrides?.enableTelemetry === 'boolean') {
+					return overrides.enableTelemetry as unknown as T;
+				}
+				return defaultValue as T;
 			}
 			return defaultValue as T;
 		},
