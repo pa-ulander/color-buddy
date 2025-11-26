@@ -17,6 +17,7 @@ import {
 	ColorDetector,
 	ExtensionController
 } from '../services';
+import { collectFormatConversions } from '../utils/colorFormatConversions';
 import { Telemetry, QuickActionTelemetryEvent, ColorInsightTelemetryEvent } from '../services/telemetry';
 import { DEFAULT_LANGUAGES } from '../types';
 import type { AccessibilityReport } from '../types';
@@ -215,6 +216,10 @@ suite('Default language literal pipeline', () => {
 			const hoverContents = hover!.contents[0] as vscode.MarkdownString;
 			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_COLOR_PREVIEW)), `hover should include color preview heading for ${language}`);
 			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_FORMATS_AVAILABLE)), `hover should list additional formats for ${language}`);
+			assert.ok(hoverContents.value.includes('command:colorbuddy.copyColorAs?'), `hover should include copy command links for ${language}`);
+			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_CLICK_TO_COPY)), `hover should describe copy affordances for ${language}`);
+			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_COLOR_NAME)), `hover should surface color naming for ${language}`);
+			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_BRIGHTNESS)), `hover should surface brightness metadata for ${language}`);
 				assert.ok(hoverContents.value.includes(t(LocalizedStrings.STATUS_BAR_USAGE_COUNT)), `hover should surface usage count for ${language}`);
 				assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_ACCESSIBILITY)), `hover should surface accessibility header for ${language}`);
 				assert.ok(hoverContents.value.includes('AAA ('), `hover should enumerate accessibility passes for ${language}`);
@@ -242,13 +247,14 @@ suite('Default language literal pipeline', () => {
 				const colorData = colorDetector.collectColorData(document, document.getText());
 				assert.ok(colorData.length > 0, 'expected at least one color for status bar test');
 					const buildTooltip = (controller as unknown as {
-						buildStatusBarTooltip(data: any, primaryValue: string, metrics: any, report: AccessibilityReport): vscode.MarkdownString;
+						buildStatusBarTooltip(data: any, primaryValue: string, metrics: any, report: AccessibilityReport, conversions: any): vscode.MarkdownString;
 					}).buildStatusBarTooltip.bind(controller);
 					const providerInstance = (controller as unknown as { provider: Provider }).provider;
 					const report = providerInstance.getAccessibilityReport(colorData[0].vscodeColor);
 					const contrastMetrics = (controller as unknown as {
 						extractContrastMetrics(report: AccessibilityReport): { contrastWhite?: any; contrastBlack?: any };
 					}).extractContrastMetrics.call(controller, report);
+					const conversions = collectFormatConversions(colorParser, colorFormatter, colorData[0].vscodeColor, colorData[0].format);
 					const tooltip = buildTooltip(
 						colorData[0],
 						colorData[0].normalizedColor,
@@ -257,8 +263,13 @@ suite('Default language literal pipeline', () => {
 							contrastWhite: contrastMetrics.contrastWhite,
 							contrastBlack: contrastMetrics.contrastBlack
 						},
-						report
+						report,
+						conversions
 					);
+				assert.ok(tooltip.value.includes(t(LocalizedStrings.TOOLTIP_CLICK_TO_COPY)), 'status bar tooltip should describe copy affordance');
+				assert.ok(tooltip.value.includes(t(LocalizedStrings.TOOLTIP_COLOR_NAME)), 'status bar tooltip should include color name');
+				assert.ok(tooltip.value.includes(t(LocalizedStrings.TOOLTIP_BRIGHTNESS)), 'status bar tooltip should include brightness metadata');
+				assert.ok(tooltip.value.includes('command:colorbuddy.copyColorAs?'), 'status bar tooltip should include copy command link');
 				assert.ok(tooltip.value.includes(t(LocalizedStrings.COMMAND_QUICK_ACTIONS_TITLE)), 'status bar tooltip should include quick actions header');
 				assert.ok(tooltip.value.includes('command:colorbuddy.executeQuickAction'), 'status bar quick actions should route through execute command');
 				const linkMatch = tooltip.value.match(/command:colorbuddy\.executeQuickAction\?([^\)\]]+)/);
