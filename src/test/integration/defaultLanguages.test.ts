@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { createControllerHarness } from '../helpers/controllerHarness';
 import { DEFAULT_LANGUAGES, type ColorData, type ColorFormat } from '../../types';
+import { t, LocalizedStrings } from '../../l10n/localization';
 
 type LanguageFixture = {
 	content: string;
@@ -146,6 +147,10 @@ suite('Default language integration coverage', () => {
 			const value = markdown.value;
 			assert.ok(value.includes('![color swatch]'), `hover should include swatch for ${language}`);
 			assert.ok(value.includes('Color Preview'), `hover should include heading for ${language}`);
+			assert.ok(value.includes('command:colorbuddy.copyColorAs?'), `hover should expose copy command links for ${language}`);
+			assert.ok(value.includes(t(LocalizedStrings.TOOLTIP_CLICK_TO_COPY)), `hover should describe copy affordance for ${language}`);
+			assert.ok(value.includes(t(LocalizedStrings.TOOLTIP_COLOR_NAME)), `hover should include color name metadata for ${language}`);
+			assert.ok(value.includes(t(LocalizedStrings.TOOLTIP_BRIGHTNESS)), `hover should include brightness metadata for ${language}`);
 		});
 	});
 });
