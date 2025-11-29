@@ -5,11 +5,12 @@ import { CSSParser } from './cssParser';
 import { Registry } from './registry';
 import { Telemetry, buildContrastTelemetry, ColorInsightColorKind } from './telemetry';
 import { t, LocalizedStrings } from '../l10n/localization';
-import type { ColorFormat, AccessibilityReport, ColorData } from '../types';
+import type { ColorFormat, AccessibilityReport, ColorData, AccessibilityCheck } from '../types';
 import { collectFormatConversions, appendFormatConversionList } from '../utils/colorFormatConversions';
 import { appendQuickActions } from '../utils/quickActions';
 import { getColorUsageCount } from '../utils/colorUsage';
 import { getColorInsights } from '../utils/colorInsights';
+import { appendWcagStatusSection } from '../utils/accessibilityFormatting';
 
 /**
  * Provider service for VS Code language providers (hover, color provider).
@@ -63,19 +64,32 @@ export class Provider {
     /**
      * Get WCAG accessibility level for a contrast ratio
      */
-    private getAccessibilityLevel(ratio: number): { level: string; passes: string[] } {
-        const passes: string[] = [];
+    private getAccessibilitySummary(ratio: number): { level: string; checks: AccessibilityCheck[] } {
+        const checks: AccessibilityCheck[] = [
+            {
+                label: t(LocalizedStrings.TOOLTIP_ACCESSIBILITY_AA_NORMAL),
+                outcome: ratio >= 4.5 ? 'pass' : 'fail'
+            },
+            {
+                label: t(LocalizedStrings.TOOLTIP_ACCESSIBILITY_AA_LARGE),
+                outcome: ratio >= 3 ? 'pass' : 'fail'
+            },
+            {
+                label: t(LocalizedStrings.TOOLTIP_ACCESSIBILITY_AAA_NORMAL),
+                outcome: ratio >= 7 ? 'pass' : 'fail'
+            }
+        ];
+
+        let level = 'Fail';
         if (ratio >= 7) {
-            passes.push('AAA (normal)', 'AAA (large)', 'AA (normal)', 'AA (large)');
-            return { level: 'AAA', passes };
+            level = 'AAA';
         } else if (ratio >= 4.5) {
-            passes.push('AA (normal)', 'AA (large)', 'AAA (large)');
-            return { level: 'AA', passes };
+            level = 'AA';
         } else if (ratio >= 3) {
-            passes.push('AA (large)');
-            return { level: 'AA Large', passes };
+            level = 'AA Large';
         }
-        return { level: 'Fail', passes: [] };
+
+        return { level, checks };
     }
 
     public getAccessibilityReport(color: vscode.Color): AccessibilityReport {
@@ -85,8 +99,8 @@ export class Provider {
         const contrastWhite = this.getContrastRatio(color, white);
         const contrastBlack = this.getContrastRatio(color, black);
 
-        const whiteLevel = this.getAccessibilityLevel(contrastWhite);
-        const blackLevel = this.getAccessibilityLevel(contrastBlack);
+        const whiteSummary = this.getAccessibilitySummary(contrastWhite);
+        const blackSummary = this.getAccessibilitySummary(contrastBlack);
 
         return {
             samples: [
@@ -95,16 +109,16 @@ export class Provider {
                     backgroundDescription: '#FFFFFF',
                     backgroundColor: white,
                     contrastRatio: contrastWhite,
-                    level: whiteLevel.level,
-                    passes: whiteLevel.passes
+                    level: whiteSummary.level,
+                    checks: whiteSummary.checks
                 },
                 {
                     label: t(LocalizedStrings.TOOLTIP_CONTRAST_ON_BLACK),
                     backgroundDescription: '#000000',
                     backgroundColor: black,
                     contrastRatio: contrastBlack,
-                    level: blackLevel.level,
-                    passes: blackLevel.passes
+                    level: blackSummary.level,
+                    checks: blackSummary.checks
                 }
             ]
         };
@@ -132,20 +146,10 @@ export class Provider {
         markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_BRIGHTNESS)}:** ${insights.brightness}%\n\n`);
     }
 
-    private appendMetricsSection(markdown: vscode.MarkdownString, usageCount: number, report: AccessibilityReport): void {
+    private appendMetricsSection(markdown: vscode.MarkdownString, data: ColorData, usageCount: number, report: AccessibilityReport): void {
         markdown.appendMarkdown(`---\n\n`);
         markdown.appendMarkdown(`**${t(LocalizedStrings.STATUS_BAR_USAGE_COUNT)}:** ${usageCount}\n\n`);
-        markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_ACCESSIBILITY)}:**\n\n`);
-        for (const sample of report.samples) {
-            const passes = sample.passes.length > 0 ? ` — ${sample.passes.join(', ')}` : '';
-            markdown.appendMarkdown(`- ${sample.label}: ${sample.level}${passes}\n`);
-        }
-        markdown.appendMarkdown(`\n`);
-        markdown.appendMarkdown(`**${t(LocalizedStrings.STATUS_BAR_CONTRAST_SUMMARY)}:**\n\n`);
-        for (const sample of report.samples) {
-            markdown.appendMarkdown(`- ${sample.label}: ${sample.contrastRatio.toFixed(2)}:1\n`);
-        }
-        markdown.appendMarkdown(`\n`);
+        appendWcagStatusSection(markdown, data.normalizedColor, report);
     }
 
     private recordHoverTelemetry(data: ColorData, usageCount: number, report: AccessibilityReport): void {
@@ -207,7 +211,7 @@ export class Provider {
         const usageCount = getColorUsageCount(colorData, data);
         const report = this.getAccessibilityReport(data.vscodeColor);
         this.recordHoverTelemetry(data, usageCount, report);
-        this.appendMetricsSection(markdown, usageCount, report);
+        this.appendMetricsSection(markdown, data, usageCount, report);
         this.appendTooltipFooter(markdown);
     }
 
@@ -305,7 +309,7 @@ export class Provider {
         const usageCount = getColorUsageCount(colorData, data);
         const report = this.getAccessibilityReport(data.vscodeColor);
         this.recordHoverTelemetry(data, usageCount, report);
-        this.appendMetricsSection(markdown, usageCount, report);
+        this.appendMetricsSection(markdown, data, usageCount, report);
         this.appendTooltipFooter(markdown);
     }
 
@@ -354,7 +358,7 @@ export class Provider {
         const usageCount = getColorUsageCount(colorData, data);
         const report = this.getAccessibilityReport(data.vscodeColor);
         this.recordHoverTelemetry(data, usageCount, report);
-        this.appendMetricsSection(markdown, usageCount, report);
+        this.appendMetricsSection(markdown, data, usageCount, report);
         this.appendTooltipFooter(markdown);
     }
 

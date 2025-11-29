@@ -217,15 +217,14 @@ suite('Default language literal pipeline', () => {
 			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_COLOR_PREVIEW)), `hover should include color preview heading for ${language}`);
 			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_FORMATS_AVAILABLE)), `hover should list additional formats for ${language}`);
 			assert.ok(hoverContents.value.includes('command:colorbuddy.copyColorAs?'), `hover should include copy command links for ${language}`);
-			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_CLICK_TO_COPY)), `hover should describe copy affordances for ${language}`);
+			assert.ok(hoverContents.value.includes('$(clippy)'), `hover should surface copy icon affordance for ${language}`);
 			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_COLOR_NAME)), `hover should surface color naming for ${language}`);
 			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_BRIGHTNESS)), `hover should surface brightness metadata for ${language}`);
-				assert.ok(hoverContents.value.includes(t(LocalizedStrings.STATUS_BAR_USAGE_COUNT)), `hover should surface usage count for ${language}`);
-				assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_ACCESSIBILITY)), `hover should surface accessibility header for ${language}`);
-				assert.ok(hoverContents.value.includes('AAA ('), `hover should enumerate accessibility passes for ${language}`);
-				assert.ok(hoverContents.value.includes(t(LocalizedStrings.STATUS_BAR_CONTRAST_SUMMARY)), `hover should surface contrast summary header for ${language}`);
-				assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_CONTRAST_ON_WHITE)), `hover should list contrast on white for ${language}`);
-				assert.ok(/Contrast on white: [\d\.]+:1/.test(hoverContents.value), `hover should surface contrast ratio details for ${language}`);
+			assert.ok(hoverContents.value.includes(t(LocalizedStrings.STATUS_BAR_USAGE_COUNT)), `hover should surface usage count for ${language}`);
+			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_WCAG_STATUS)), `hover should surface WCAG status heading for ${language}`);
+			assert.ok(hoverContents.value.includes('#22c55e') || hoverContents.value.includes('#ef4444'), `hover should include colored pass/fail icons for ${language}`);
+			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_CONTRAST_ON_WHITE)), `hover should list contrast on white for ${language}`);
+			assert.ok(/Contrast on white \([\d\.]+:1\)/.test(hoverContents.value), `hover should surface contrast ratio details for ${language}`);
 			assert.ok(hoverContents.value.includes(t(LocalizedStrings.COMMAND_QUICK_ACTIONS_TITLE)), `hover should include quick actions heading for ${language}`);
 			assert.ok(hoverContents.value.includes('command:colorbuddy.executeQuickAction'), `hover should route quick actions through execute command for ${language}`);
 			const hoverLinkMatch = hoverContents.value.match(/command:colorbuddy\.executeQuickAction\?([^\)\]]+)/);
@@ -266,9 +265,11 @@ suite('Default language literal pipeline', () => {
 						report,
 						conversions
 					);
-				assert.ok(tooltip.value.includes(t(LocalizedStrings.TOOLTIP_CLICK_TO_COPY)), 'status bar tooltip should describe copy affordance');
+				assert.ok(tooltip.value.includes('$(clippy)'), 'status bar tooltip should surface copy icon affordance');
 				assert.ok(tooltip.value.includes(t(LocalizedStrings.TOOLTIP_COLOR_NAME)), 'status bar tooltip should include color name');
 				assert.ok(tooltip.value.includes(t(LocalizedStrings.TOOLTIP_BRIGHTNESS)), 'status bar tooltip should include brightness metadata');
+				assert.ok(tooltip.value.includes(t(LocalizedStrings.TOOLTIP_WCAG_STATUS)), 'status bar tooltip should include WCAG status heading');
+				assert.ok(tooltip.value.includes('#22c55e') || tooltip.value.includes('#ef4444'), 'status bar tooltip should surface colored pass/fail icons');
 				assert.ok(tooltip.value.includes('command:colorbuddy.copyColorAs?'), 'status bar tooltip should include copy command link');
 				assert.ok(tooltip.value.includes(t(LocalizedStrings.COMMAND_QUICK_ACTIONS_TITLE)), 'status bar tooltip should include quick actions header');
 				assert.ok(tooltip.value.includes('command:colorbuddy.executeQuickAction'), 'status bar quick actions should route through execute command');

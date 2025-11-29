@@ -30,6 +30,7 @@ import { appendQuickActions, EXECUTE_QUICK_ACTION_COMMAND, QuickActionLinkPayloa
 import { Telemetry, buildContrastTelemetry, ColorInsightColorKind } from './telemetry';
 import { getColorUsageCount } from '../utils/colorUsage';
 import { getColorInsights } from '../utils/colorInsights';
+import { appendWcagStatusSection } from '../utils/accessibilityFormatting';
 
 const CSS_LIKE_LANGUAGES = new Set([
 	'css',
@@ -1290,12 +1291,7 @@ export class ExtensionController implements vscode.Disposable {
 		markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_COLOR_NAME)}:** ${insights.name} (\`${insights.hex}\`)\n\n`);
 		markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_BRIGHTNESS)}:** ${insights.brightness}%\n\n`);
 		markdown.appendMarkdown(`**${t(LocalizedStrings.STATUS_BAR_USAGE_COUNT)}:** ${metrics.usageCount}\n\n`);
-
-		markdown.appendMarkdown(`**${t(LocalizedStrings.STATUS_BAR_CONTRAST_SUMMARY)}:**\n\n`);
-		for (const sample of report.samples) {
-			markdown.appendMarkdown(`- ${sample.label}: ${sample.contrastRatio.toFixed(2)}:1 (${sample.level})\n`);
-		}
-		markdown.appendMarkdown('\n');
+		appendWcagStatusSection(markdown, data.normalizedColor, report);
 
 		appendFormatConversionList(markdown, conversions, { surface: 'statusBar' });
 

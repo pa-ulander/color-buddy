@@ -98,8 +98,9 @@ export function appendFormatConversionList(
             source: surface
         };
         const encodedPayload = encodeURIComponent(JSON.stringify(payload));
+        const title = t(LocalizedStrings.COMMAND_QUICK_ACTION_COPY).replace(/"/g, '\\"');
         markdown.appendMarkdown(
-            `- ${label}: [\`${conversion.value}\`](command:colorbuddy.copyColorAs?${encodedPayload}) — ${t(LocalizedStrings.TOOLTIP_CLICK_TO_COPY)}\n`
+            `- ${label}: [\`${conversion.value}\` $(clippy)](command:colorbuddy.copyColorAs?${encodedPayload} "${title}")\n`
         );
     }
 
