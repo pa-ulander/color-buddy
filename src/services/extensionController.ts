@@ -1296,7 +1296,28 @@ export class ExtensionController implements vscode.Disposable {
 
 		appendFormatConversionList(markdown, conversions, { surface: 'statusBar' });
 
-		appendQuickActions(markdown, { surface: 'statusBar' });
+		const copyPayload: CopyColorCommandPayload | undefined = (() => {
+			const primaryConversion = conversions[0];
+			const value = primaryConversion?.value ?? primaryValue;
+			if (!value) {
+				return undefined;
+			}
+			return {
+				value,
+				format: primaryConversion?.format,
+				source: 'statusBar'
+			};
+		})();
+
+		const overrides = copyPayload
+			? {
+					'colorbuddy.copyColorAs': {
+						args: [copyPayload]
+					}
+				}
+			: undefined;
+
+		appendQuickActions(markdown, { surface: 'statusBar', overrides });
 
 		return markdown;
 	}

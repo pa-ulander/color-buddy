@@ -9,6 +9,10 @@ interface QuickAction {
 	args?: unknown[];
 }
 
+interface QuickActionOverride {
+	args?: unknown[];
+}
+
 export interface QuickActionLinkPayload {
 	target: string;
 	source: QuickActionSurface;
@@ -17,6 +21,7 @@ export interface QuickActionLinkPayload {
 
 interface AppendQuickActionsOptions {
 	surface?: QuickActionSurface;
+	overrides?: Record<string, QuickActionOverride>;
 }
 
 export const EXECUTE_QUICK_ACTION_COMMAND = 'colorbuddy.executeQuickAction';
@@ -37,8 +42,10 @@ export function appendQuickActions(markdown: vscode.MarkdownString, options?: Ap
 			source: surface
 		};
 
-		if (action.args && action.args.length > 0) {
-			payload.args = action.args;
+		const override = options?.overrides?.[action.command];
+		const args = override?.args ?? action.args;
+		if (args && args.length > 0) {
+			payload.args = args;
 		}
 
 		const encodedPayload = encodeURIComponent(JSON.stringify(payload));
