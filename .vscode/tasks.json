@@ -6,7 +6,20 @@
     {
       "type": "npm",
       "script": "watch",
-      "problemMatcher": "$tsc-watch",
+      "label": "watch",
+      "problemMatcher": {
+        "owner": "webpack",
+        "fileLocation": "autoDetect",
+        "pattern": {
+          "regexp": "^ERROR in (.*)$",
+          "message": 1
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^\\s*\\[webpack-cli\\] Compiler starting",
+          "endsPattern": "^\\s*webpack .*compiled successfully"
+        }
+      },
       "isBackground": true,
       "presentation": {
         "reveal": "never",
@@ -30,7 +43,7 @@
     },
     {
       "label": "tasks: watch-tests",
-      "dependsOn": ["npm: watch", "npm: watch-tests"],
+      "dependsOn": ["watch", "npm: watch-tests"],
       "problemMatcher": []
     }
   ]
