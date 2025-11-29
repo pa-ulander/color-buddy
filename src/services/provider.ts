@@ -5,8 +5,8 @@ import { CSSParser } from './cssParser';
 import { Registry } from './registry';
 import { Telemetry, buildContrastTelemetry, ColorInsightColorKind } from './telemetry';
 import { t, LocalizedStrings } from '../l10n/localization';
-import type { ColorFormat, AccessibilityReport, ColorData, AccessibilityCheck } from '../types';
-import { collectFormatConversions, appendFormatConversionList } from '../utils/colorFormatConversions';
+import type { ColorFormat, AccessibilityReport, ColorData, AccessibilityCheck, CopyColorCommandPayload } from '../types';
+import { collectFormatConversions, appendFormatConversionList, FormatConversion } from '../utils/colorFormatConversions';
 import { appendQuickActions } from '../utils/quickActions';
 import { getColorUsageCount } from '../utils/colorUsage';
 import { getColorInsights } from '../utils/colorInsights';
@@ -127,17 +127,40 @@ export class Provider {
     /**
      * Append a divider at the end of tooltip content
      */
-    private appendTooltipFooter(markdown: vscode.MarkdownString): void {
-        appendQuickActions(markdown, { surface: 'hover' });
+    private appendTooltipFooter(markdown: vscode.MarkdownString, data: ColorData, conversions?: FormatConversion[]): void {
+        const primaryConversion = conversions?.[0];
+        const payload: CopyColorCommandPayload | undefined = (() => {
+            const value = primaryConversion?.value ?? data.normalizedColor ?? data.originalText;
+            if (!value) {
+                return undefined;
+            }
+            const format = primaryConversion?.format ?? data.format;
+            return {
+                value,
+                format,
+                source: 'hover'
+            };
+        })();
+
+        const overrides = payload
+            ? {
+                    'colorbuddy.copyColorAs': {
+                        args: [payload]
+                    }
+                }
+            : undefined;
+
+        appendQuickActions(markdown, { surface: 'hover', overrides });
         markdown.appendMarkdown('---\n\n');
     }
 
     /**
      * Append alternate format conversions for the active color when available.
      */
-    private appendFormatConversions(markdown: vscode.MarkdownString, color: vscode.Color, primaryFormat?: ColorFormat): void {
+    private appendFormatConversions(markdown: vscode.MarkdownString, color: vscode.Color, primaryFormat?: ColorFormat): FormatConversion[] {
         const conversions = collectFormatConversions(this.colorParser, this.colorFormatter, color, primaryFormat);
         appendFormatConversionList(markdown, conversions, { surface: 'hover' });
+        return conversions;
     }
 
     private appendColorInsights(markdown: vscode.MarkdownString, color: vscode.Color): void {
@@ -211,8 +234,8 @@ export class Provider {
         const report = this.getAccessibilityReport(data.vscodeColor);
         this.recordHoverTelemetry(data, usageCount, report);
         this.appendMetricsSection(markdown, data, usageCount, report);
-        this.appendFormatConversions(markdown, data.vscodeColor, data.format);
-        this.appendTooltipFooter(markdown);
+        const conversions = this.appendFormatConversions(markdown, data.vscodeColor, data.format);
+        this.appendTooltipFooter(markdown, data, conversions);
     }
 
     /**
@@ -231,7 +254,7 @@ export class Provider {
             markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_VARIABLE)}:** \`${data.variableName}\`\n\n`);
             markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_VARIABLE_NOT_FOUND_MESSAGE)}\n\n`);
             markdown.appendMarkdown(`*${t(LocalizedStrings.TOOLTIP_VARIABLE_NOT_FOUND_HINT)}*\n\n`);
-            this.appendTooltipFooter(markdown);
+            this.appendTooltipFooter(markdown, data);
             return;
         }
 
@@ -308,8 +331,8 @@ export class Provider {
         const report = this.getAccessibilityReport(data.vscodeColor);
         this.recordHoverTelemetry(data, usageCount, report);
         this.appendMetricsSection(markdown, data, usageCount, report);
-        this.appendFormatConversions(markdown, data.vscodeColor, data.format);
-        this.appendTooltipFooter(markdown);
+        const conversions = this.appendFormatConversions(markdown, data.vscodeColor, data.format);
+        this.appendTooltipFooter(markdown, data, conversions);
     }
 
     /**
@@ -357,8 +380,8 @@ export class Provider {
         const report = this.getAccessibilityReport(data.vscodeColor);
         this.recordHoverTelemetry(data, usageCount, report);
         this.appendMetricsSection(markdown, data, usageCount, report);
-        this.appendFormatConversions(markdown, data.vscodeColor, data.format);
-        this.appendTooltipFooter(markdown);
+        const conversions = this.appendFormatConversions(markdown, data.vscodeColor, data.format);
+        this.appendTooltipFooter(markdown, data, conversions);
     }
 
     /**
