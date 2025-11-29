@@ -42,7 +42,8 @@ export function appendQuickActions(markdown: vscode.MarkdownString, options?: Ap
 		}
 
 		const encodedPayload = encodeURIComponent(JSON.stringify(payload));
-		return `[${action.label}](command:${EXECUTE_QUICK_ACTION_COMMAND}?${encodedPayload})`;
+		const title = action.label.replace(/"/g, '\\"');
+		return `[${action.label}](command:${EXECUTE_QUICK_ACTION_COMMAND}?${encodedPayload} "${title}")`;
 	});
 
 	markdown.appendMarkdown(`**${t(LocalizedStrings.COMMAND_QUICK_ACTIONS_TITLE)}:**\n\n`);

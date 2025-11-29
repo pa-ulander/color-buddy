@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import type { AccessibilityReport, ColorData, ColorFormat, CopyColorCommandPayload } from '../types';
+import type { AccessibilityReport, ColorData, ColorFormat, CopyColorCommandPayload, CSSVariableDeclaration } from '../types';
 import { DEFAULT_LANGUAGES } from '../types';
 import {
 	MAX_CSS_FILES,
@@ -1291,6 +1291,7 @@ export class ExtensionController implements vscode.Disposable {
 		markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_COLOR_NAME)}:** ${insights.name} (\`${insights.hex}\`)\n\n`);
 		markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_BRIGHTNESS)}:** ${insights.brightness}%\n\n`);
 		markdown.appendMarkdown(`**${t(LocalizedStrings.STATUS_BAR_USAGE_COUNT)}:** ${metrics.usageCount}\n\n`);
+		this.appendCssVariableContexts(markdown, data);
 		appendWcagStatusSection(markdown, data.normalizedColor, report);
 
 		appendFormatConversionList(markdown, conversions, { surface: 'statusBar' });
@@ -1298,6 +1299,50 @@ export class ExtensionController implements vscode.Disposable {
 		appendQuickActions(markdown, { surface: 'statusBar' });
 
 		return markdown;
+	}
+
+	private appendCssVariableContexts(markdown: vscode.MarkdownString, data: ColorData): void {
+		if (!data.isCssVariable || !data.variableName) {
+			return;
+		}
+		const declarations = this.registry.getVariable(data.variableName);
+		if (!declarations || declarations.length === 0) {
+			return;
+		}
+
+		const sorted = [...declarations].sort((a, b) => a.context.specificity - b.context.specificity);
+		const rootDecl = sorted.find(decl => decl.context.type === 'root');
+		const lightDecl = sorted.find(decl => decl.context.themeHint === 'light');
+		const darkDecl = sorted.find(decl => decl.context.themeHint === 'dark');
+
+		if (rootDecl) {
+			this.appendVariableDeclaration(markdown, rootDecl, t(LocalizedStrings.TOOLTIP_DEFAULT_THEME));
+		}
+		if (lightDecl && lightDecl !== rootDecl) {
+			this.appendVariableDeclaration(markdown, lightDecl, t(LocalizedStrings.TOOLTIP_LIGHT_THEME));
+		}
+		if (darkDecl) {
+			this.appendVariableDeclaration(markdown, darkDecl, t(LocalizedStrings.TOOLTIP_DARK_THEME));
+		}
+	}
+
+	private appendVariableDeclaration(markdown: vscode.MarkdownString, declaration: CSSVariableDeclaration, label: string): void {
+		const resolved = declaration.resolvedValue ?? this.cssParser.resolveNestedVariables(declaration.value);
+		const parsed = this.colorParser.parseColor(resolved);
+		if (parsed) {
+			const swatchUri = this.createColorSwatchDataUri(parsed.cssString);
+			markdown.appendMarkdown(`![color swatch](${swatchUri}) **${label}:** \`${resolved}\`\n\n`);
+		} else {
+			markdown.appendMarkdown(`**${label}:** \`${resolved}\`\n\n`);
+		}
+		markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_DEFINED_IN)} [${vscode.workspace.asRelativePath(declaration.uri)}:${declaration.line + 1}](${declaration.uri.toString()}#L${declaration.line + 1})\n\n`);
+	}
+
+	private createColorSwatchDataUri(color: string): string {
+		const sanitizedColor = color.replace(/'/g, "\\'").replace(/"/g, '\\"');
+		const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="${sanitizedColor}" stroke="white" stroke-width="1" /></svg>`;
+		const encodedSvg = Buffer.from(svg).toString('base64');
+		return `data:image/svg+xml;base64,${encodedSvg}`;
 	}
 
 	private async updateStatusBar(editor: vscode.TextEditor | undefined): Promise<void> {
