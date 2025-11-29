@@ -46,23 +46,6 @@ Adds color indicators and mouseover information anywhere a common color code is 
 ]
 ```
 
-*   `colorbuddy.enableTelemetry`: opt-in toggle that lets ColorBuddy record anonymous quick action usage metrics. Disabled by default; no telemetry is collected unless you enable this setting.
-
-### Telemetry endpoint & credentials
-
-ColorBuddy reads the telemetry destination and any required credentials from environment variables so nothing sensitive lives in your VS Code settings. Create a `.env` file alongside your workspace and add the following keys (or export them in your shell):
-
-```
-COLORBUDDY_TELEMETRY_ENDPOINT=https://your-api.example.com/colorbuddy/metrics
-COLORBUDDY_TELEMETRY_API_KEY=replace-with-api-key
-# Optional overrides
-# COLORBUDDY_TELEMETRY_API_KEY_HEADER=x-api-key
-# COLORBUDDY_TELEMETRY_USERNAME=service-account
-# COLORBUDDY_TELEMETRY_PASSWORD=replace-with-password
-```
-
-API keys are sent via the configured header (default `x-api-key`). If you provide both `COLORBUDDY_TELEMETRY_USERNAME` and `COLORBUDDY_TELEMETRY_PASSWORD`, ColorBuddy will fall back to HTTP Basic authentication instead. Update the `.env` file (or your environment variables) and reload VS Code whenever you rotate credentials.
-
 **Default languages include**
 
 *   **CSS/Styling**: `css`, `scss`, `sass`, `less`, `stylus`, `postcss`
