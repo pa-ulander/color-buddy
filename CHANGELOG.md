@@ -13,11 +13,13 @@ _Release date: to be announced._
 - PostCSS support: `.pcss`/`.postcss` documents are now indexed and exposed through ColorBuddy’s hover and color provider pipelines, including custom language remaps.
 - Comprehensive fixture-driven coverage across the default language list, Tailwind utilities, and CSS variable scenarios to safeguard hover, decoration, and color picker behavior.
 - Watcher integration tests validating registry refresh on create/change events and cleanup on delete to prevent stale metadata.
+- Hover and status bar tooltips now surface codicon-based copy actions and shared CSS variable context swatches for consistent affordances across surfaces.
 
 ### Changed
 - Native color provider deferral now keys off language identifiers while CSS parsing keys off file extensions, ensuring remapped Sass/SCSS/LESS/PostCSS documents retain ColorBuddy features without duplicating native pickers.
 - Decoration scheduler improvements (chunk yields, pooling) keep refreshes responsive when large documents contain many CSS variable decorations.
 - Workflows now emit performance traces and analyzer reports directly through maintainer commands for easier diagnostics.
+- WCAG accessibility summaries now display colored pass/fail icons, reposition format listings below accessibility details, and remove bullet markers for a cleaner layout shared by hover and status bar tooltips.
 
 ### Fixed
 - File watcher delete events now remove CSS variables and classes from the registry immediately, eliminating ghost entries after files are renamed or removed.

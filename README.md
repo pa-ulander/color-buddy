@@ -4,7 +4,7 @@
 
 ## ColorBuddy - Your VS Code Color Companion
 
-Adds color indicators and mouseover information anywhere a common color code is found in text or code. Find color definitions and navigate fast just like you are used to. Helps with theming or to manage cumbersome refactoring and accessability concerns. Finds defifnitions from CSS variables, Tailwind classes, and CSS class names with color properties. Plays nice together with other extensions.
+Adds color indicators and mouseover information anywhere a common color code is found in text or code. Find color definitions and navigate fast just like you are used to. Helps with theming or to manage cumbersome refactoring and accessability concerns. Finds definitions from CSS variables, Tailwind classes, and CSS class names with color properties. Plays nice together with other extensions.
 
 ## Latest New Features
 *   **Inline color indicator** beside each detected color value
