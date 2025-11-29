@@ -227,7 +227,7 @@ suite('Default language literal pipeline', () => {
 			assert.ok(/Contrast on white \([\d\.]+:1\)/.test(hoverContents.value), `hover should surface contrast ratio details for ${language}`);
 			assert.ok(hoverContents.value.includes(t(LocalizedStrings.COMMAND_QUICK_ACTIONS_TITLE)), `hover should include quick actions heading for ${language}`);
 			assert.ok(hoverContents.value.includes('command:colorbuddy.executeQuickAction'), `hover should route quick actions through execute command for ${language}`);
-			const hoverLinkMatch = hoverContents.value.match(/command:colorbuddy\.executeQuickAction\?([^\)\]]+)/);
+			const hoverLinkMatch = hoverContents.value.match(/command:colorbuddy\.executeQuickAction\?([^"\)\]]+)/);
 			assertDefined(hoverLinkMatch, `expected quick action link payload for ${language}`);
 			const hoverPayload = JSON.parse(decodeURIComponent(hoverLinkMatch![1]));
 			assert.strictEqual(hoverPayload.target, 'colorbuddy.copyColorAs', `hover quick action should target copy command for ${language}`);
@@ -273,7 +273,7 @@ suite('Default language literal pipeline', () => {
 				assert.ok(tooltip.value.includes('command:colorbuddy.copyColorAs?'), 'status bar tooltip should include copy command link');
 				assert.ok(tooltip.value.includes(t(LocalizedStrings.COMMAND_QUICK_ACTIONS_TITLE)), 'status bar tooltip should include quick actions header');
 				assert.ok(tooltip.value.includes('command:colorbuddy.executeQuickAction'), 'status bar quick actions should route through execute command');
-				const linkMatch = tooltip.value.match(/command:colorbuddy\.executeQuickAction\?([^\)\]]+)/);
+				const linkMatch = tooltip.value.match(/command:colorbuddy\.executeQuickAction\?([^"\)\]]+)/);
 				assertDefined(linkMatch, 'status bar quick action payload should be present');
 				const payload = JSON.parse(decodeURIComponent(linkMatch![1]));
 				assert.strictEqual(payload.target, 'colorbuddy.copyColorAs', 'status bar quick action should include copy command link');

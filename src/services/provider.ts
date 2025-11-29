@@ -199,7 +199,6 @@ export class Provider {
         markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_PROPERTY)}:** \`${declarations[0].property}\`\n\n`);
         markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_VALUE)}:** \`${declarations[0].value}\`\n\n`);
 
-        this.appendFormatConversions(markdown, data.vscodeColor, data.format);
         this.appendColorInsights(markdown, data.vscodeColor);
 
         markdown.appendMarkdown(`---\n\n`);
@@ -212,6 +211,7 @@ export class Provider {
         const report = this.getAccessibilityReport(data.vscodeColor);
         this.recordHoverTelemetry(data, usageCount, report);
         this.appendMetricsSection(markdown, data, usageCount, report);
+        this.appendFormatConversions(markdown, data.vscodeColor, data.format);
         this.appendTooltipFooter(markdown);
     }
 
@@ -242,7 +242,6 @@ export class Provider {
             markdown.appendMarkdown(`![color swatch](${swatchUri}) \`${data.tailwindClass}\`\n\n`);
             markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_MAPS_TO)}:** \`${data.variableName}\`\n\n`);
 
-            this.appendFormatConversions(markdown, data.vscodeColor, data.format);
             this.appendColorInsights(markdown, data.vscodeColor);
 
             markdown.appendMarkdown(`---\n\n`);
@@ -262,7 +261,6 @@ export class Provider {
         
         if (!data.isTailwindClass) {
             markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_VARIABLE)}:** \`${data.variableName}\`\n\n`);
-            this.appendFormatConversions(markdown, data.vscodeColor, data.format);
             this.appendColorInsights(markdown, data.vscodeColor);
             markdown.appendMarkdown(`---\n\n`);
         }
@@ -310,6 +308,7 @@ export class Provider {
         const report = this.getAccessibilityReport(data.vscodeColor);
         this.recordHoverTelemetry(data, usageCount, report);
         this.appendMetricsSection(markdown, data, usageCount, report);
+        this.appendFormatConversions(markdown, data.vscodeColor, data.format);
         this.appendTooltipFooter(markdown);
     }
 
@@ -352,13 +351,13 @@ export class Provider {
         }
         markdown.appendMarkdown(`\n\n`);
 
-        this.appendFormatConversions(markdown, data.vscodeColor, data.format);
         this.appendColorInsights(markdown, data.vscodeColor);
 
         const usageCount = getColorUsageCount(colorData, data);
         const report = this.getAccessibilityReport(data.vscodeColor);
         this.recordHoverTelemetry(data, usageCount, report);
         this.appendMetricsSection(markdown, data, usageCount, report);
+        this.appendFormatConversions(markdown, data.vscodeColor, data.format);
         this.appendTooltipFooter(markdown);
     }
 
