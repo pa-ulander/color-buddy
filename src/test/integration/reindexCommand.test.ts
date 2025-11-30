@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { ExtensionController } from '../../services';
+import { AccessibilityViewProvider } from '../../services/accessibilityViewProvider';
 import { perfLogger } from '../../utils/performanceLogger';
 import { t, LocalizedStrings } from '../../l10n/localization';
 import type { CSSVariableDeclaration } from '../../types';
@@ -37,6 +38,7 @@ if (FIND_COLOR_USAGE_START === -1) {
 }
 
 const FIND_COLOR_USAGE_END = FIND_COLOR_USAGE_START + FIND_COLOR_USAGE_HEX.length;
+const ACCESSIBILITY_VIEW_COMMAND = 'workbench.view.extension.colorbuddy';
 
 suite('Command Integration', () => {
 	function createDisposable(): vscode.Disposable {
@@ -53,6 +55,7 @@ suite('Command Integration', () => {
 		openDocuments: Array<{ content: string | undefined; language: string | undefined }>;
 		showTextDocuments: Array<{ document: vscode.TextDocument }>;
 		getFindFilesCallCount(): number;
+		getExecutedCommands(): Array<{ command: string; args: unknown[] }>;
 		configUpdates: Array<{ name: string; value: unknown }>;
 		setActiveEditor(editor?: vscode.TextEditor): void;
 		setVisibleEditors(editors: readonly vscode.TextEditor[]): void;
@@ -89,6 +92,10 @@ suite('Command Integration', () => {
 		} as unknown as vscode.TextSearchMatch;
 	}
 
+	function getAccessibilityView(env: CommandTestEnvironment): AccessibilityViewProvider {
+		return (env.controller as unknown as { accessibilityViewProvider: AccessibilityViewProvider }).accessibilityViewProvider;
+	}
+
 	async function setupCommandTestEnvironment(options?: {
 		perfLoggingEnabled?: boolean;
 		warningSelection?: string;
@@ -120,8 +127,12 @@ suite('Command Integration', () => {
 			return createDisposable();
 		}) as typeof vscode.commands.registerCommand;
 
+		const executedCommands: Array<{ command: string; args: unknown[] }> = [];
 		const originalExecuteCommand = vscode.commands.executeCommand;
-		(vscode.commands as unknown as { executeCommand: typeof vscode.commands.executeCommand }).executeCommand = (async () => undefined) as typeof vscode.commands.executeCommand;
+		(vscode.commands as unknown as { executeCommand: typeof vscode.commands.executeCommand }).executeCommand = (async (command: string, ...args: unknown[]) => {
+			executedCommands.push({ command, args });
+			return undefined;
+		}) as typeof vscode.commands.executeCommand;
 
 		const originalFindFiles = vscode.workspace.findFiles;
 		(vscode.workspace as unknown as { findFiles: typeof vscode.workspace.findFiles }).findFiles = (async () => {
@@ -176,6 +187,12 @@ suite('Command Integration', () => {
 			_thisArg?: unknown,
 			_disposables?: vscode.Disposable[]
 		) => createDisposable()) as typeof vscode.workspace.onDidChangeConfiguration;
+
+		const originalRegisterWebviewViewProvider = vscode.window.registerWebviewViewProvider;
+		(vscode.window as unknown as { registerWebviewViewProvider: typeof vscode.window.registerWebviewViewProvider }).registerWebviewViewProvider = ((
+			_viewId: string,
+			_provider: vscode.WebviewViewProvider
+		) => createDisposable()) as typeof vscode.window.registerWebviewViewProvider;
 
 		const originalRegisterHoverProvider = vscode.languages.registerHoverProvider;
 		(vscode.languages as unknown as { registerHoverProvider: typeof vscode.languages.registerHoverProvider }).registerHoverProvider = ((
@@ -379,6 +396,7 @@ suite('Command Integration', () => {
 			openDocuments,
 			showTextDocuments,
 			getFindFilesCallCount: () => findFilesCallCount,
+			getExecutedCommands: () => [...executedCommands],
 			configUpdates,
 			setActiveEditor: (editor?: vscode.TextEditor) => {
 				activeEditorState.editor = editor;
@@ -420,6 +438,7 @@ suite('Command Integration', () => {
 				(vscode.workspace as unknown as { onDidChangeTextDocument: typeof vscode.workspace.onDidChangeTextDocument }).onDidChangeTextDocument = originalOnDidChangeTextDocument;
 				(vscode.workspace as unknown as { onDidCloseTextDocument: typeof vscode.workspace.onDidCloseTextDocument }).onDidCloseTextDocument = originalOnDidCloseTextDocument;
 				(vscode.workspace as unknown as { onDidChangeConfiguration: typeof vscode.workspace.onDidChangeConfiguration }).onDidChangeConfiguration = originalOnDidChangeConfiguration;
+				(vscode.window as unknown as { registerWebviewViewProvider: typeof vscode.window.registerWebviewViewProvider }).registerWebviewViewProvider = originalRegisterWebviewViewProvider;
 				(vscode.languages as unknown as { registerHoverProvider: typeof vscode.languages.registerHoverProvider }).registerHoverProvider = originalRegisterHoverProvider;
 				(vscode.languages as unknown as { registerColorProvider: typeof vscode.languages.registerColorProvider }).registerColorProvider = originalRegisterColorProvider;
 				(vscode.window as unknown as { showInformationMessage: typeof vscode.window.showInformationMessage }).showInformationMessage = originalShowInformationMessage;
@@ -853,14 +872,47 @@ suite('Command Integration', () => {
 			env.setVisibleEditors([editor]);
 
 			const initialInfoCount = env.infoMessages.length;
+			const executedBefore = env.getExecutedCommands().length;
 			await (command as (...args: unknown[]) => unknown)();
 
+			const executed = env.getExecutedCommands().slice(executedBefore);
+			assert.ok(
+				executed.some(entry => entry.command === ACCESSIBILITY_VIEW_COMMAND),
+				'Expected Activity Bar view command to run for accessibility results'
+			);
 			const newMessages = env.infoMessages.slice(initialInfoCount);
-			assert.ok(newMessages.length > 0, 'Expected an accessibility summary message');
-			const summary = newMessages[0];
-			assert.ok(summary.includes('Accessibility for'), 'Summary should mention the evaluated color');
-			assert.ok(summary.includes('Contrast on white'), 'Summary should include contrast against white');
-			assert.ok(summary.includes('Contrast on black'), 'Summary should include contrast against black');
+			assert.strictEqual(newMessages.length, 0, 'Accessibility results now render in the Activity Bar instead of notifications');
+			const viewData = getAccessibilityView(env).getLastRenderedData();
+			assert.ok(viewData, 'Accessibility view should receive report data');
+			assert.ok(viewData?.label.includes(FIND_COLOR_USAGE_HEX), 'View data should reflect the evaluated color label');
+			const sampleLabels = viewData?.report.samples.map(sample => sample.label) ?? [];
+			assert.ok(sampleLabels.some(label => /white/i.test(label)), 'Report should include contrast against white');
+			assert.ok(sampleLabels.some(label => /black/i.test(label)), 'Report should include contrast against black');
+		} finally {
+			await env.restore();
+		}
+	});
+
+	test('colorbuddy.testColorAccessibility accepts payload without requiring an editor', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const command = env.registeredCommands.get('colorbuddy.testColorAccessibility');
+			assert.ok(typeof command === 'function', 'Test color accessibility command missing');
+
+			const initialInfoCount = env.infoMessages.length;
+			const executedBefore = env.getExecutedCommands().length;
+			await (command as (...args: unknown[]) => unknown)({ value: 'rgb(15, 23, 42)', label: 'rgb(15, 23, 42)' });
+
+			const executed = env.getExecutedCommands().slice(executedBefore);
+			assert.ok(
+				executed.some(entry => entry.command === ACCESSIBILITY_VIEW_COMMAND),
+				'Payload invocation should still reveal the Activity Bar view'
+			);
+			const newMessages = env.infoMessages.slice(initialInfoCount);
+			assert.strictEqual(newMessages.length, 0, 'Payload invocation should not post notifications');
+			const viewData = getAccessibilityView(env).getLastRenderedData();
+			assert.ok(viewData, 'Payload invocation should populate view data');
+			assert.ok(viewData?.report.samples.length && viewData.report.samples[0].contrastRatio > 0, 'Report samples should include computed ratios');
 		} finally {
 			await env.restore();
 		}

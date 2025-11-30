@@ -317,6 +317,25 @@ suite('Default language literal pipeline', () => {
 			assert.strictEqual(payloadArg.value, '12 76% 61%', 'copy payload should include raw CSS variable value');
 		});
 
+		test('hover accessibility action includes normalized color value', async () => {
+			const document = createMockDocument('body { color: #123456; }', 'css');
+			const colorData = colorDetector.collectColorData(document, document.getText());
+			const literalColor = colorData.find(data => data.originalText.includes('#123456'));
+			assertDefined(literalColor, 'expected literal color data');
+
+			const hover = await provider.provideHover(colorData, literalColor.range.start);
+			assertDefined(hover, 'expected hover for literal color');
+			const hoverMarkdown = hover!.contents[0] as vscode.MarkdownString;
+			const payloads = extractQuickActionPayloads(hoverMarkdown);
+			const accessibilityPayload = payloads.find(payload => payload.target === 'colorbuddy.testColorAccessibility');
+			assertDefined(accessibilityPayload, 'expected hover accessibility payload');
+			const payloadArg = accessibilityPayload!.args?.[0];
+			assertDefined(payloadArg, 'expected hover accessibility payload args');
+			assert.strictEqual(payloadArg.value, literalColor.normalizedColor, 'accessibility payload should include normalized color value');
+			assert.strictEqual(payloadArg.label, literalColor.originalText, 'accessibility payload should describe the original text');
+			assert.strictEqual(accessibilityPayload!.source, 'hover', 'hover payload should mark hover surface');
+		});
+
 		test('status bar copy action uses CSS variable declaration value', () => {
 			registry.clear();
 			const variableUri = vscode.Uri.parse('file:///workspace/palette.css');
@@ -371,6 +390,54 @@ suite('Default language literal pipeline', () => {
 				assert.ok(Array.isArray(copyPayload!.args), 'expected status bar quick action args');
 				const payloadArg = copyPayload!.args[0];
 				assert.strictEqual(payloadArg.value, '12 76% 61%', 'status bar copy payload should use raw CSS variable value');
+			} finally {
+				controller.dispose();
+				restoreConfig();
+			}
+		});
+
+		test('status bar accessibility action includes normalized color value', () => {
+			const restoreConfig = stubWorkspaceLanguages(['css']);
+			const controller = new ExtensionController({ subscriptions: [] } as unknown as vscode.ExtensionContext);
+			try {
+				const document = createMockDocument('div { color: #abcdef; }', 'css');
+				const colorData = colorDetector.collectColorData(document, document.getText());
+				const literal = colorData[0];
+				const providerInstance = (controller as unknown as { provider: Provider }).provider;
+				const report = providerInstance.getAccessibilityReport(literal.vscodeColor);
+				const contrastMetrics = (controller as unknown as {
+					extractContrastMetrics(report: AccessibilityReport): { contrastWhite?: any; contrastBlack?: any };
+				}).extractContrastMetrics.call(controller, report);
+				const conversions = collectFormatConversions(colorParser, colorFormatter, literal.vscodeColor, literal.format);
+				const buildTooltip = (controller as unknown as {
+					buildStatusBarTooltip(
+						data: any,
+						primaryValue: string,
+						metrics: any,
+						report: AccessibilityReport,
+						conversions: any
+					): vscode.MarkdownString;
+				}).buildStatusBarTooltip.bind(controller);
+				const primaryValue = conversions[0]?.value ?? literal.normalizedColor;
+				const tooltip = buildTooltip(
+					literal,
+					primaryValue,
+					{
+						usageCount: 1,
+						contrastWhite: contrastMetrics.contrastWhite,
+						contrastBlack: contrastMetrics.contrastBlack
+					},
+					report,
+					conversions
+				);
+
+				const payloads = extractQuickActionPayloads(tooltip);
+				const accessibilityPayload = payloads.find(payload => payload.target === 'colorbuddy.testColorAccessibility');
+				assertDefined(accessibilityPayload, 'expected status bar accessibility payload');
+				const payloadArg = accessibilityPayload!.args?.[0];
+				assertDefined(payloadArg, 'expected status bar accessibility payload args');
+				assert.strictEqual(payloadArg.value, literal.normalizedColor, 'status bar accessibility payload should use normalized value');
+				assert.strictEqual(accessibilityPayload!.source, 'statusBar', 'status bar payload should mark status bar surface');
 			} finally {
 				controller.dispose();
 				restoreConfig();
@@ -538,9 +605,23 @@ suite('Cache behaviour', () => {
 });
 
 function extractQuickActionPayloads(markdown: vscode.MarkdownString): any[] {
-	const regex = /command:colorbuddy\.executeQuickAction\?([^"\)\]]+)/g;
-	const matches = markdown.value.matchAll(regex);
-	return Array.from(matches, match => JSON.parse(decodeURIComponent(match[1])));
+	const regex = /command:colorbuddy\.executeQuickAction\?([^\s\]]+)/g;
+	const payloads: any[] = [];
+	for (const match of markdown.value.matchAll(regex)) {
+		const encoded = match[1];
+		const decoded = decodeURIComponent(encoded).trim();
+		const closingBraceIndex = decoded.lastIndexOf('}');
+		if (closingBraceIndex === -1) {
+			throw new Error(`Failed to parse quick action payload: ${encoded}. Missing closing brace.`);
+		}
+		const jsonString = decoded.slice(0, closingBraceIndex + 1);
+		try {
+			payloads.push(JSON.parse(jsonString));
+		} catch (error) {
+			throw new Error(`Failed to parse quick action payload: ${encoded}. ${(error as Error).message}`);
+		}
+	}
+	return payloads;
 }
 
 function stubExecuteCommand<T>(result: T): () => void {

@@ -5,7 +5,14 @@ import { CSSParser } from './cssParser';
 import { Registry } from './registry';
 import { Telemetry, buildContrastTelemetry, ColorInsightColorKind } from './telemetry';
 import { t, LocalizedStrings } from '../l10n/localization';
-import type { ColorFormat, AccessibilityReport, ColorData, AccessibilityCheck, CopyColorCommandPayload } from '../types';
+import type {
+    ColorFormat,
+    AccessibilityReport,
+    ColorData,
+    AccessibilityCheck,
+    CopyColorCommandPayload,
+    TestAccessibilityCommandPayload
+} from '../types';
 import { collectFormatConversions, appendFormatConversionList, FormatConversion } from '../utils/colorFormatConversions';
 import { appendQuickActions } from '../utils/quickActions';
 import { getColorUsageCount } from '../utils/colorUsage';
@@ -148,15 +155,34 @@ export class Provider {
             };
         })();
 
-        const overrides = payload
+        const accessibilityPayload: TestAccessibilityCommandPayload | undefined = data.normalizedColor
             ? {
-                    'colorbuddy.copyColorAs': {
-                        args: [payload]
-                    }
+                    value: data.normalizedColor,
+                    format: data.format,
+                    source: 'hover',
+                    label: data.originalText
                 }
             : undefined;
 
-        appendQuickActions(markdown, { surface: 'hover', overrides });
+        const overrides = {
+            ...(payload
+                ? {
+                        'colorbuddy.copyColorAs': {
+                            args: [payload]
+                        }
+                    }
+                : undefined),
+            ...(accessibilityPayload
+                ? {
+                        'colorbuddy.testColorAccessibility': {
+                            args: [accessibilityPayload]
+                        }
+                    }
+                : undefined)
+        };
+
+        const quickActionOverrides = Object.keys(overrides).length > 0 ? overrides : undefined;
+        appendQuickActions(markdown, { surface: 'hover', overrides: quickActionOverrides });
         markdown.appendMarkdown('---\n\n');
     }
 

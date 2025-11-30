@@ -27,6 +27,14 @@ export async function createControllerHarness(): Promise<ControllerHarness> {
 		_callback: (...args: unknown[]) => unknown
 	) => createDisposable()) as typeof vscode.commands.registerCommand;
 
+	const windowNamespace = vscode.window as unknown as { registerWebviewViewProvider: typeof vscode.window.registerWebviewViewProvider };
+	const originalRegisterViewProvider = windowNamespace.registerWebviewViewProvider;
+	windowNamespace.registerWebviewViewProvider = ((
+		_viewId: string,
+		_provider: vscode.WebviewViewProvider
+		// Tests spin up multiple controllers per VS Code session, so short-circuit view registration to avoid duplicate ID errors.
+	) => createDisposable()) as typeof vscode.window.registerWebviewViewProvider;
+
 	const workspaceNamespace = vscode.workspace as unknown as { createFileSystemWatcher: typeof vscode.workspace.createFileSystemWatcher };
 	const originalCreateFileSystemWatcher = workspaceNamespace.createFileSystemWatcher;
 	workspaceNamespace.createFileSystemWatcher = (() => ({
@@ -45,6 +53,7 @@ export async function createControllerHarness(): Promise<ControllerHarness> {
 		controller,
 		restore: () => {
 			commandsNamespace.registerCommand = originalRegisterCommand;
+			windowNamespace.registerWebviewViewProvider = originalRegisterViewProvider;
 			workspaceNamespace.createFileSystemWatcher = originalCreateFileSystemWatcher;
 			controller.dispose();
 		}
