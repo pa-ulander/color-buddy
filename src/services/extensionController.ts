@@ -1,6 +1,13 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import type { AccessibilityReport, ColorData, ColorFormat, CopyColorCommandPayload, CSSVariableDeclaration } from '../types';
+import type {
+	AccessibilityReport,
+	ColorData,
+	ColorFormat,
+	CopyColorCommandPayload,
+	ConvertColorCommandPayload,
+	CSSVariableDeclaration
+} from '../types';
 import { DEFAULT_LANGUAGES } from '../types';
 import {
 	MAX_CSS_FILES,
@@ -27,6 +34,7 @@ import { Provider } from './provider';
 import { collectFormatConversions, getFormatLabel, appendFormatConversionList } from '../utils/colorFormatConversions';
 import type { FormatConversion } from '../utils/colorFormatConversions';
 import { appendQuickActions, EXECUTE_QUICK_ACTION_COMMAND, QuickActionLinkPayload } from '../utils/quickActions';
+import { buildConvertColorCommandPayload } from '../utils/commandPayloads';
 import { Telemetry, buildContrastTelemetry, ColorInsightColorKind } from './telemetry';
 import { getColorUsageCount } from '../utils/colorUsage';
 import { getColorInsights } from '../utils/colorInsights';
@@ -223,7 +231,9 @@ export class ExtensionController implements vscode.Disposable {
 			vscode.commands.registerCommand('colorbuddy.copyColorAs', (payload?: CopyColorCommandPayload) => this.handleCopyColorCommand(payload)),
 			vscode.commands.registerCommand('colorbuddy.findColorUsages', () => this.handleFindColorUsagesCommand()),
 			vscode.commands.registerCommand('colorbuddy.testColorAccessibility', () => this.handleTestAccessibilityCommand()),
-			vscode.commands.registerCommand('colorbuddy.convertColorFormat', () => this.handleConvertColorFormatCommand()),
+			vscode.commands.registerCommand('colorbuddy.convertColorFormat', (payload?: ConvertColorCommandPayload) =>
+				this.handleConvertColorFormatCommand(payload)
+			),
 			vscode.commands.registerCommand(EXECUTE_QUICK_ACTION_COMMAND, payload => this.handleExecuteQuickActionCommand(payload))
 		];
 
@@ -434,7 +444,14 @@ export class ExtensionController implements vscode.Disposable {
 		}
 	}
 
-	private async handleConvertColorFormatCommand(): Promise<void> {
+	private async handleConvertColorFormatCommand(payload?: ConvertColorCommandPayload): Promise<void> {
+		if (payload) {
+			const handled = await this.tryConvertColorFromPayload(payload);
+			if (handled) {
+				return;
+			}
+		}
+
 		const editor = vscode.window.activeTextEditor;
 		if (!editor) {
 			await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_NO_EDITOR));
@@ -449,50 +466,95 @@ export class ExtensionController implements vscode.Disposable {
 				return;
 			}
 
-			const conversions = collectFormatConversions(this.colorParser, this.colorFormatter, activeColor.vscodeColor, activeColor.format);
-			if (conversions.length === 0) {
-				await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_NO_ALTERNATIVES));
-				return;
-			}
-
-			const currentValue = editor.document.getText(activeColor.range);
-			const alternativeConversions = conversions.filter(conversion => conversion.value !== currentValue);
-			if (alternativeConversions.length === 0) {
-				await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_NO_ALTERNATIVES));
-				return;
-			}
-
-			let chosen = alternativeConversions[0];
-			if (conversions.length > 1) {
-				const quickPickItems = conversions.map(conversion => ({
-					label: conversion.value,
-					description: getFormatLabel(conversion.format),
-					detail: conversion.value === currentValue ? t(LocalizedStrings.COMMAND_CONVERT_COLOR_CURRENT_LABEL) : undefined
-				}));
-				const selection = await vscode.window.showQuickPick(quickPickItems, {
-					title: t(LocalizedStrings.COMMAND_CONVERT_COLOR_TITLE),
-					placeHolder: t(LocalizedStrings.COMMAND_CONVERT_COLOR_PLACEHOLDER)
-				});
-				if (!selection) {
-					return;
-				}
-				chosen = conversions.find(conversion => conversion.value === selection.label) ?? alternativeConversions[0];
-			}
-
-			const editApplied = await editor.edit(editBuilder => {
-				editBuilder.replace(activeColor.range, chosen.value);
-			});
-
-			if (!editApplied) {
-				await vscode.window.showErrorMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_ERROR));
-				return;
-			}
-
-			await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_SUCCESS, chosen.value));
+			await this.performColorConversion(editor, activeColor.range, activeColor.vscodeColor, activeColor.format);
 		} catch (error) {
 			console.error(`${LOG_PREFIX} failed to convert color`, error);
 			await vscode.window.showErrorMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_ERROR));
 		}
+	}
+
+	private async tryConvertColorFromPayload(payload: ConvertColorCommandPayload): Promise<boolean> {
+		if (!payload.uri || !payload.range || !payload.normalizedColor) {
+			return false;
+		}
+
+		try {
+			const uri = vscode.Uri.parse(payload.uri);
+			let editor = vscode.window.visibleTextEditors.find(ed => ed.document.uri.toString() === uri.toString());
+			if (!editor) {
+				const document = await vscode.workspace.openTextDocument(uri);
+				editor = await vscode.window.showTextDocument(document, { preview: false });
+			}
+
+			if (!editor) {
+				return true;
+			}
+
+			const start = new vscode.Position(payload.range.start.line, payload.range.start.character);
+			const end = new vscode.Position(payload.range.end.line, payload.range.end.character);
+			const range = new vscode.Range(start, end);
+			const candidate = payload.normalizedColor || payload.originalText || editor.document.getText(range);
+			const parsed = this.colorParser.parseColor(candidate);
+			if (!parsed) {
+				await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_NO_COLOR));
+				return true;
+			}
+
+			await this.performColorConversion(editor, range, parsed.vscodeColor, payload.format ?? parsed.formatPriority[0]);
+			return true;
+		} catch (error) {
+			console.error(`${LOG_PREFIX} failed to convert color from payload`, error);
+			await vscode.window.showErrorMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_ERROR));
+			return true;
+		}
+	}
+
+	private async performColorConversion(
+		editor: vscode.TextEditor,
+		range: vscode.Range,
+		color: vscode.Color,
+		format?: ColorFormat
+	): Promise<void> {
+		const conversions = collectFormatConversions(this.colorParser, this.colorFormatter, color, format);
+		if (conversions.length === 0) {
+			await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_NO_ALTERNATIVES));
+			return;
+		}
+
+		const currentValue = editor.document.getText(range);
+		const alternativeConversions = conversions.filter(conversion => conversion.value !== currentValue);
+		if (alternativeConversions.length === 0) {
+			await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_NO_ALTERNATIVES));
+			return;
+		}
+
+		let chosen = alternativeConversions[0];
+		if (conversions.length > 1) {
+			const quickPickItems = conversions.map(conversion => ({
+				label: conversion.value,
+				description: getFormatLabel(conversion.format),
+				detail: conversion.value === currentValue ? t(LocalizedStrings.COMMAND_CONVERT_COLOR_CURRENT_LABEL) : undefined
+			}));
+			const selection = await vscode.window.showQuickPick(quickPickItems, {
+				title: t(LocalizedStrings.COMMAND_CONVERT_COLOR_TITLE),
+				placeHolder: t(LocalizedStrings.COMMAND_CONVERT_COLOR_PLACEHOLDER)
+			});
+			if (!selection) {
+				return;
+			}
+			chosen = conversions.find(conversion => conversion.value === selection.label) ?? alternativeConversions[0];
+		}
+
+		const editApplied = await editor.edit(editBuilder => {
+			editBuilder.replace(range, chosen.value);
+		});
+
+		if (!editApplied) {
+			await vscode.window.showErrorMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_ERROR));
+			return;
+		}
+
+		await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_SUCCESS, chosen.value));
 	}
 
 	private async ensurePerformanceLoggingEnabled(): Promise<boolean> {
@@ -1297,16 +1359,17 @@ export class ExtensionController implements vscode.Disposable {
 		appendFormatConversionList(markdown, conversions, { surface: 'statusBar' });
 
 		const copyPayload = this.buildQuickActionCopyPayload(data, conversions, primaryValue);
+		const convertPayload = buildConvertColorCommandPayload(data, 'statusBar');
+		const overrides: Record<string, { args: unknown[] }> = {};
+		if (copyPayload) {
+			overrides['colorbuddy.copyColorAs'] = { args: [copyPayload] };
+		}
+		if (convertPayload) {
+			overrides['colorbuddy.convertColorFormat'] = { args: [convertPayload] };
+		}
 
-		const overrides = copyPayload
-			? {
-					'colorbuddy.copyColorAs': {
-						args: [copyPayload]
-					}
-				}
-			: undefined;
-
-		appendQuickActions(markdown, { surface: 'statusBar', overrides });
+		const quickActionOverrides = Object.keys(overrides).length > 0 ? overrides : undefined;
+		appendQuickActions(markdown, { surface: 'statusBar', overrides: quickActionOverrides });
 
 		return markdown;
 	}
