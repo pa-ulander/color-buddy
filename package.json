@@ -44,6 +44,25 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "colorbuddy",
+          "title": "ColorBuddy",
+          "icon": "media/colorbuddy-activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "colorbuddy": [
+        {
+          "id": "colorbuddy.accessibilityReport",
+          "name": "Accessibility Report",
+          "type": "webview",
+          "contextualTitle": "ColorBuddy Accessibility"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "colorbuddy.reindexCSSFiles",
