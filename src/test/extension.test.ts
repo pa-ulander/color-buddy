@@ -290,6 +290,32 @@ suite('Default language literal pipeline', () => {
 	});
 
 	suite('Quick action payload values', () => {
+		test('hover convert action uses hover context for payload', async () => {
+			const document = createMockDocument('body { color: #abcdef; }', 'css');
+			const colorData = colorDetector.collectColorData(document, document.getText());
+			const literal = colorData.find(data => document.getText(data.range) === '#abcdef');
+			assertDefined(literal, 'expected literal color data for hover payload test');
+
+			const hover = await provider.provideHover(colorData, literal.range.start);
+			assertDefined(hover, 'expected hover result when building convert payload');
+			const hoverMarkdown = hover!.contents[0] as vscode.MarkdownString;
+			const payloads = extractQuickActionPayloads(hoverMarkdown);
+			const convertPayload = payloads.find(payload => payload.target === 'colorbuddy.convertColorFormat');
+			assertDefined(convertPayload, 'expected convert quick action payload');
+			assert.ok(Array.isArray(convertPayload!.args), 'expected convert quick action args array');
+			const payloadArg = convertPayload!.args[0];
+			assert.strictEqual(payloadArg.uri, document.uri.toString(), 'convert payload should point to the hovered document');
+			assert.deepStrictEqual(
+				payloadArg.range,
+				{
+					start: { line: literal.range.start.line, character: literal.range.start.character },
+					end: { line: literal.range.end.line, character: literal.range.end.character }
+				},
+				'convert payload should encode the hovered range'
+			);
+			assert.ok(typeof payloadArg.normalizedColor === 'string' && payloadArg.normalizedColor.length > 0, 'convert payload should include normalized color text');
+		});
+
 		test('hover copy action uses CSS variable declaration value', async () => {
 			registry.clear();
 			const variableUri = vscode.Uri.parse('file:///workspace/palette.css');
@@ -371,6 +397,62 @@ suite('Default language literal pipeline', () => {
 				assert.ok(Array.isArray(copyPayload!.args), 'expected status bar quick action args');
 				const payloadArg = copyPayload!.args[0];
 				assert.strictEqual(payloadArg.value, '12 76% 61%', 'status bar copy payload should use raw CSS variable value');
+			} finally {
+				controller.dispose();
+				restoreConfig();
+			}
+		});
+
+		test('status bar convert action encodes the active document range', () => {
+			const restoreConfig = stubWorkspaceLanguages(['plaintext']);
+			const controller = new ExtensionController({ subscriptions: [] } as unknown as vscode.ExtensionContext);
+			try {
+				const document = createMockDocument('body { color: #445566; }', 'plaintext');
+				const colorData = colorDetector.collectColorData(document, document.getText());
+				const literal = colorData.find(data => document.getText(data.range) === '#445566');
+				assertDefined(literal, 'expected literal color for status bar convert payload test');
+
+				const providerInstance = (controller as unknown as { provider: Provider }).provider;
+				const report = providerInstance.getAccessibilityReport(literal.vscodeColor);
+				const contrastMetrics = (controller as unknown as {
+					extractContrastMetrics(report: AccessibilityReport): { contrastWhite?: any; contrastBlack?: any };
+				}).extractContrastMetrics.call(controller, report);
+				const conversions = collectFormatConversions(colorParser, colorFormatter, literal.vscodeColor, literal.format);
+				const buildTooltip = (controller as unknown as {
+					buildStatusBarTooltip(
+						data: any,
+						primaryValue: string,
+						metrics: any,
+						report: AccessibilityReport,
+						conversions: any
+					): vscode.MarkdownString;
+				}).buildStatusBarTooltip.bind(controller);
+				const tooltip = buildTooltip(
+					literal,
+					literal.normalizedColor,
+					{
+						usageCount: 1,
+						contrastWhite: contrastMetrics.contrastWhite,
+						contrastBlack: contrastMetrics.contrastBlack
+					},
+					report,
+					conversions
+				);
+
+				const payloads = extractQuickActionPayloads(tooltip);
+				const convertPayload = payloads.find(payload => payload.target === 'colorbuddy.convertColorFormat');
+				assertDefined(convertPayload, 'expected status bar convert payload');
+				const payloadArg = convertPayload!.args?.[0];
+				assertDefined(payloadArg, 'expected status bar convert payload argument');
+				assert.strictEqual(payloadArg.uri, document.uri.toString(), 'status bar convert payload should reference the document');
+				assert.deepStrictEqual(
+					payloadArg.range,
+					{
+						start: { line: literal.range.start.line, character: literal.range.start.character },
+						end: { line: literal.range.end.line, character: literal.range.end.character }
+					},
+					'convert payload should encode the literal range'
+				);
 			} finally {
 				controller.dispose();
 				restoreConfig();

@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
 import { ExtensionController } from '../../services';
 import { perfLogger } from '../../utils/performanceLogger';
 import { t, LocalizedStrings } from '../../l10n/localization';
-import type { CSSVariableDeclaration } from '../../types';
+import type { CSSVariableDeclaration, ConvertColorCommandPayload } from '../../types';
 import { createMockDocument } from '../helpers';
 
 process.setMaxListeners(0);
@@ -794,6 +794,59 @@ suite('Command Integration', () => {
 			assert.ok(edit.text.toLowerCase().startsWith('rgb'), 'Converted text should be in RGB format');
 			const infoMessages = env.infoMessages.slice(initialInfoCount);
 			assert.ok(infoMessages.some(message => message.includes(edit.text)), 'Success message should mention the converted value');
+		} finally {
+			await env.restore();
+		}
+	});
+
+	test('colorbuddy.convertColorFormat converts provided payload without moving the cursor', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const command = env.registeredCommands.get('colorbuddy.convertColorFormat');
+			assert.ok(typeof command === 'function', 'Convert color format command missing');
+
+			const document = createMockDocument('body { color: #112233; }');
+			const cursor = new vscode.Position(0, 0);
+			const selection = new vscode.Selection(cursor, cursor);
+			const editor = createEditor(document, selection);
+			env.setActiveEditor(editor);
+			env.setVisibleEditors([editor]);
+			env.setQuickPickHandler(items => items.find(item => item.label.toLowerCase().startsWith('rgb')) ?? items[0]);
+
+			const colorIndex = document.getText().indexOf('#112233');
+			assert.ok(colorIndex >= 0, 'expected to find color literal in document');
+			const start = document.positionAt(colorIndex);
+			const end = document.positionAt(colorIndex + '#112233'.length);
+			const payload: ConvertColorCommandPayload = {
+				uri: document.uri.toString(),
+				range: {
+					start: { line: start.line, character: start.character },
+					end: { line: end.line, character: end.character }
+				},
+				normalizedColor: '#112233',
+				originalText: '#112233',
+				format: 'hex'
+			};
+
+			const appliedEdits: Array<{ range: vscode.Range; text: string }> = [];
+			(editor as unknown as { edit: typeof editor.edit }).edit = async callback => {
+				callback({
+					replace: (range: vscode.Range, text: string) => {
+						appliedEdits.push({ range, text });
+					}
+				} as vscode.TextEditorEdit);
+				return true;
+			};
+
+			const initialInfoCount = env.infoMessages.length;
+			await (command as (...args: unknown[]) => unknown)(payload);
+
+			assert.strictEqual(env.quickPickRequests.length, 1, 'Expected a quick pick when payload triggers conversion');
+			assert.strictEqual(appliedEdits.length, 1, 'Payload conversion should apply a single edit');
+			const [edit] = appliedEdits;
+			assert.ok(edit.text.toLowerCase().startsWith('rgb'), 'Payload conversion should honor selected format');
+			const messages = env.infoMessages.slice(initialInfoCount);
+			assert.ok(messages.some(message => message.includes(edit.text)), 'Success message should mention converted value');
 		} finally {
 			await env.restore();
 		}
