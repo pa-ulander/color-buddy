@@ -8,6 +8,7 @@ import { t, LocalizedStrings } from '../l10n/localization';
 import type { ColorFormat, AccessibilityReport, ColorData, AccessibilityCheck, CopyColorCommandPayload } from '../types';
 import { collectFormatConversions, appendFormatConversionList, FormatConversion } from '../utils/colorFormatConversions';
 import { appendQuickActions } from '../utils/quickActions';
+import { buildConvertColorCommandPayload } from '../utils/commandPayloads';
 import { getColorUsageCount } from '../utils/colorUsage';
 import { getColorInsights } from '../utils/colorInsights';
 import { appendWcagStatusSection } from '../utils/accessibilityFormatting';
@@ -148,15 +149,17 @@ export class Provider {
             };
         })();
 
-        const overrides = payload
-            ? {
-                    'colorbuddy.copyColorAs': {
-                        args: [payload]
-                    }
-                }
-            : undefined;
+        const convertPayload = buildConvertColorCommandPayload(data, 'hover');
+        const overrides: Record<string, { args: unknown[] }> = {};
+        if (payload) {
+            overrides['colorbuddy.copyColorAs'] = { args: [payload] };
+        }
+        if (convertPayload) {
+            overrides['colorbuddy.convertColorFormat'] = { args: [convertPayload] };
+        }
 
-        appendQuickActions(markdown, { surface: 'hover', overrides });
+        const quickActionOverrides = Object.keys(overrides).length > 0 ? overrides : undefined;
+        appendQuickActions(markdown, { surface: 'hover', overrides: quickActionOverrides });
         markdown.appendMarkdown('---\n\n');
     }
 
