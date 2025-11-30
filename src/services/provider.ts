@@ -15,6 +15,7 @@ import type {
 } from '../types';
 import { collectFormatConversions, appendFormatConversionList, FormatConversion } from '../utils/colorFormatConversions';
 import { appendQuickActions } from '../utils/quickActions';
+import { buildConvertColorCommandPayload } from '../utils/commandPayloads';
 import { getColorUsageCount } from '../utils/colorUsage';
 import { getColorInsights } from '../utils/colorInsights';
 import { appendWcagStatusSection } from '../utils/accessibilityFormatting';
@@ -155,6 +156,7 @@ export class Provider {
             };
         })();
 
+        const convertPayload = buildConvertColorCommandPayload(data, 'hover');
         const accessibilityPayload: TestAccessibilityCommandPayload | undefined = data.normalizedColor
             ? {
                     value: data.normalizedColor,
@@ -164,23 +166,16 @@ export class Provider {
                 }
             : undefined;
 
-        const overrides = {
-            ...(payload
-                ? {
-                        'colorbuddy.copyColorAs': {
-                            args: [payload]
-                        }
-                    }
-                : undefined),
-            ...(accessibilityPayload
-                ? {
-                        'colorbuddy.testColorAccessibility': {
-                            args: [accessibilityPayload]
-                        }
-                    }
-                : undefined)
-        };
-
+        const overrides: Record<string, { args?: unknown[] }> = {};
+        if (payload) {
+            overrides['colorbuddy.copyColorAs'] = { args: [payload] };
+        }
+        if (convertPayload) {
+            overrides['colorbuddy.convertColorFormat'] = { args: [convertPayload] };
+        }
+        if (accessibilityPayload) {
+            overrides['colorbuddy.testColorAccessibility'] = { args: [accessibilityPayload] };
+        }
         const quickActionOverrides = Object.keys(overrides).length > 0 ? overrides : undefined;
         appendQuickActions(markdown, { surface: 'hover', overrides: quickActionOverrides });
         markdown.appendMarkdown('---\n\n');
