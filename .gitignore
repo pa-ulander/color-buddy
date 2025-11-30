@@ -1,4 +1,3 @@
-.github/*.md
 .vscode-test/*
 !img
 dist
