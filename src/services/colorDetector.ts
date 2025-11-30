@@ -59,6 +59,7 @@ export class ColorDetector {
                 originalText: matchText,
                 normalizedColor: parsed.cssString,
                 vscodeColor: parsed.vscodeColor,
+                documentUri: document.uri,
                 format: parsed.formatPriority[0]
             });
         };
@@ -185,6 +186,7 @@ export class ColorDetector {
             originalText: fullMatch,
             normalizedColor: parsed.cssString,
             vscodeColor: parsed.vscodeColor,
+            documentUri: document.uri,
             isCssVariable: true,
             variableName: variableName,
             isWrappedInFunction: !!wrappingFunction,
@@ -245,6 +247,7 @@ export class ColorDetector {
             originalText: fullMatch,
             normalizedColor: parsed.cssString,
             vscodeColor: parsed.vscodeColor,
+            documentUri: document.uri,
             isTailwindClass: true,
             tailwindClass: fullMatch,
             isCssVariable: true,
@@ -295,6 +298,7 @@ export class ColorDetector {
             originalText: className,
             normalizedColor: parsed.cssString,
             vscodeColor: parsed.vscodeColor,
+            documentUri: document.uri,
             isCssClass: true,
             cssClassName: className,
             format: parsed.formatPriority[0]
@@ -373,6 +377,7 @@ export class ColorDetector {
             originalText: variableName,
             normalizedColor: parsed.cssString,
             vscodeColor: parsed.vscodeColor,
+            documentUri: document.uri,
             isCssVariable: true,
             variableName,
             isCssVariableDeclaration: true,
