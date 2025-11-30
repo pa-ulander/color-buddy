@@ -8,3 +8,10 @@ export interface CopyColorCommandPayload {
 	source?: CopyColorCommandSource;
 	showNotification?: boolean;
 }
+
+export interface TestAccessibilityCommandPayload {
+	value: string;
+	format?: ColorFormat;
+	source?: CopyColorCommandSource;
+	label?: string;
+}

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import type { AccessibilityReport, ColorData, ColorFormat, CopyColorCommandPayload, CSSVariableDeclaration } from '../types';
+import type { AccessibilityReport, ColorData, ColorFormat, CopyColorCommandPayload, CSSVariableDeclaration, TestAccessibilityCommandPayload } from '../types';
 import { DEFAULT_LANGUAGES } from '../types';
 import {
 	MAX_CSS_FILES,
@@ -31,6 +31,7 @@ import { Telemetry, buildContrastTelemetry, ColorInsightColorKind } from './tele
 import { getColorUsageCount } from '../utils/colorUsage';
 import { getColorInsights } from '../utils/colorInsights';
 import { appendWcagStatusSection } from '../utils/accessibilityFormatting';
+import { AccessibilityViewProvider, type AccessibilityReportPresenter, type AccessibilityViewData } from './accessibilityViewProvider';
 
 const CSS_LIKE_LANGUAGES = new Set([
 	'css',
@@ -59,6 +60,8 @@ const CSS_LIKE_FILE_EXTENSIONS = new Set([
 
 const SASS_FILE_EXTENSIONS = new Set(['.sass']);
 const MAX_COLOR_USAGE_RESULTS = 200;
+const ACCESSIBILITY_VIEW_ID = 'colorbuddy.accessibilityReport';
+const COLORBUDDY_CONTAINER_COMMAND = 'workbench.view.extension.colorbuddy';
 
 interface ColorUsageMatch {
 	uri: vscode.Uri;
@@ -85,6 +88,13 @@ interface ContrastSummary {
 	level: string;
 }
 
+interface AccessibilityCommandColorContext {
+	vscodeColor: vscode.Color;
+	label: string;
+	normalizedColor: string;
+	format?: ColorFormat;
+}
+
 /**
  * Main extension controller managing lifecycle and coordination between services.
  * Follows the dependency injection pattern for better testability and maintainability.
@@ -98,6 +108,7 @@ export class ExtensionController implements vscode.Disposable {
 	private readonly colorDetector: ColorDetector;
 	private readonly cssParser: CSSParser;
 	private readonly provider: Provider;
+	private readonly accessibilityViewProvider: AccessibilityReportPresenter;
 	private readonly telemetry: Telemetry;
 	private readonly disposables: vscode.Disposable[] = [];
 	private cssFileWatcher: vscode.FileSystemWatcher | null = null;
@@ -117,6 +128,7 @@ export class ExtensionController implements vscode.Disposable {
 		this.cssParser = new CSSParser(this.registry, this.colorParser);
 		this.telemetry = options?.telemetry ?? new Telemetry();
 		this.provider = new Provider(this.registry, this.colorParser, this.colorFormatter, this.cssParser, this.telemetry);
+		this.accessibilityViewProvider = new AccessibilityViewProvider(this.context.extensionUri);
 		this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 		this.statusBarItem.name = 'ColorBuddy Active Color';
 		const statusBarPayload: QuickActionLinkPayload = {
@@ -144,6 +156,7 @@ export class ExtensionController implements vscode.Disposable {
 		this.registerCommands();
 		this.registerEventHandlers();
 		this.registerLanguageProviders();
+		this.registerViewProviders();
 		this.refreshVisibleEditors();
 		this.context.subscriptions.push(this.statusBarItem);
 		this.statusBarItem.hide();
@@ -222,7 +235,7 @@ export class ExtensionController implements vscode.Disposable {
 			vscode.commands.registerCommand('colorbuddy.capturePerformanceSnapshot', () => this.handleCapturePerformanceSnapshotCommand()),
 			vscode.commands.registerCommand('colorbuddy.copyColorAs', (payload?: CopyColorCommandPayload) => this.handleCopyColorCommand(payload)),
 			vscode.commands.registerCommand('colorbuddy.findColorUsages', () => this.handleFindColorUsagesCommand()),
-			vscode.commands.registerCommand('colorbuddy.testColorAccessibility', () => this.handleTestAccessibilityCommand()),
+			vscode.commands.registerCommand('colorbuddy.testColorAccessibility', (payload?: TestAccessibilityCommandPayload) => this.handleTestAccessibilityCommand(payload)),
 			vscode.commands.registerCommand('colorbuddy.convertColorFormat', () => this.handleConvertColorFormatCommand()),
 			vscode.commands.registerCommand(EXECUTE_QUICK_ACTION_COMMAND, payload => this.handleExecuteQuickActionCommand(payload))
 		];
@@ -407,30 +420,76 @@ export class ExtensionController implements vscode.Disposable {
 		await this.presentColorUsageResults(trimmed, matches);
 	}
 
-	private async handleTestAccessibilityCommand(): Promise<void> {
-		const editor = vscode.window.activeTextEditor;
-		if (!editor) {
-			await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_TEST_ACCESSIBILITY_NO_EDITOR));
-			return;
-		}
-
+	private async handleTestAccessibilityCommand(payload?: TestAccessibilityCommandPayload): Promise<void> {
 		try {
-			const colorData = await this.ensureColorData(editor.document);
-			const activeColor = this.getActiveColorAtPosition(colorData, editor.selection.active);
-			if (!activeColor) {
-				await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_TEST_ACCESSIBILITY_NO_COLOR));
+			const context = await this.resolveAccessibilityColorContext(payload);
+			if (!context) {
 				return;
 			}
 
-			const report = this.provider.getAccessibilityReport(activeColor.vscodeColor);
-			const summary = report.samples
-				.map(sample => `${sample.label}: ${sample.contrastRatio.toFixed(2)}:1 (${sample.level})`)
-				.join('\n');
-			const message = t(LocalizedStrings.COMMAND_TEST_ACCESSIBILITY_RESULTS, activeColor.normalizedColor, summary);
-			await vscode.window.showInformationMessage(message);
+			const report = this.provider.getAccessibilityReport(context.vscodeColor);
+			const conversions = collectFormatConversions(this.colorParser, this.colorFormatter, context.vscodeColor, context.format);
+			const insights = getColorInsights(context.vscodeColor);
+			const data: AccessibilityViewData = {
+				label: context.label || context.normalizedColor,
+				normalizedColor: context.normalizedColor,
+				colorName: insights.name,
+				colorHex: insights.hex,
+				brightness: insights.brightness,
+				report,
+				conversions
+			};
+
+			await this.presentAccessibilityReport(data);
 		} catch (error) {
 			console.error(`${LOG_PREFIX} failed to test color accessibility`, error);
 			await vscode.window.showErrorMessage(t(LocalizedStrings.COMMAND_TEST_ACCESSIBILITY_ERROR));
+		}
+	}
+
+	private async resolveAccessibilityColorContext(payload?: TestAccessibilityCommandPayload): Promise<AccessibilityCommandColorContext | null> {
+		if (payload?.value) {
+			const parsed = this.colorParser.parseColor(payload.value);
+			if (!parsed) {
+				await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_TEST_ACCESSIBILITY_NO_COLOR));
+				return null;
+			}
+			return {
+				vscodeColor: parsed.vscodeColor,
+				label: payload.label ?? payload.value,
+				normalizedColor: parsed.cssString,
+				format: payload.format ?? parsed.formatPriority[0]
+			};
+		}
+
+		const editor = vscode.window.activeTextEditor;
+		if (!editor) {
+			await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_TEST_ACCESSIBILITY_NO_EDITOR));
+			return null;
+		}
+
+		const colorData = await this.ensureColorData(editor.document);
+		const activeColor = this.getActiveColorAtPosition(colorData, editor.selection.active);
+		if (!activeColor) {
+			await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_TEST_ACCESSIBILITY_NO_COLOR));
+			return null;
+		}
+
+		return {
+			vscodeColor: activeColor.vscodeColor,
+			label: activeColor.originalText,
+			normalizedColor: activeColor.normalizedColor ?? activeColor.originalText,
+			format: activeColor.format
+		};
+	}
+
+	private async presentAccessibilityReport(data: AccessibilityViewData): Promise<void> {
+		this.accessibilityViewProvider.updateReport(data);
+		try {
+			await vscode.commands.executeCommand(COLORBUDDY_CONTAINER_COMMAND);
+			this.accessibilityViewProvider.reveal(false);
+		} catch (error) {
+			console.error(`${LOG_PREFIX} failed to reveal accessibility report view`, error);
 		}
 	}
 
@@ -755,6 +814,16 @@ export class ExtensionController implements vscode.Disposable {
 		this.stateManager.addProviderSubscription(hoverProvider);
 		this.stateManager.addProviderSubscription(colorProvider);
 		this.context.subscriptions.push(hoverProvider, colorProvider);
+	}
+
+	private registerViewProviders(): void {
+		const accessibilityView = vscode.window.registerWebviewViewProvider(ACCESSIBILITY_VIEW_ID, this.accessibilityViewProvider, {
+			webviewOptions: {
+				retainContextWhenHidden: true
+			}
+		});
+		this.context.subscriptions.push(accessibilityView);
+		this.disposables.push(accessibilityView);
 	}
 
 	/**
@@ -1297,16 +1366,25 @@ export class ExtensionController implements vscode.Disposable {
 		appendFormatConversionList(markdown, conversions, { surface: 'statusBar' });
 
 		const copyPayload = this.buildQuickActionCopyPayload(data, conversions, primaryValue);
-
-		const overrides = copyPayload
+		const accessibilityPayload: TestAccessibilityCommandPayload | undefined = data.normalizedColor
 			? {
-					'colorbuddy.copyColorAs': {
-						args: [copyPayload]
-					}
+					value: data.normalizedColor,
+					format: data.format,
+					source: 'statusBar',
+					label: data.originalText
 				}
 			: undefined;
 
-		appendQuickActions(markdown, { surface: 'statusBar', overrides });
+		const overrides: Record<string, { args?: unknown[] }> = {};
+		if (copyPayload) {
+			overrides['colorbuddy.copyColorAs'] = { args: [copyPayload] };
+		}
+		if (accessibilityPayload) {
+			overrides['colorbuddy.testColorAccessibility'] = { args: [accessibilityPayload] };
+		}
+		const quickActionOverrides = Object.keys(overrides).length > 0 ? overrides : undefined;
+
+		appendQuickActions(markdown, { surface: 'statusBar', overrides: quickActionOverrides });
 
 		return markdown;
 	}
