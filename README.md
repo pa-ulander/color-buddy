@@ -13,7 +13,7 @@ Adds color indicators and mouseover information anywhere a common color code is 
 *   **Configurable language support** via the `colorbuddy.languages` setting
 *   **Tailwind compact HSL support** in addition to hex, rgb/rgba, and hsl/hsla and more  
 *   **Lightweight and performant** with caching and efficient parsing
-*   **accessibility testing** with contrast ratio info in the hover tooltip
+*   **Accessibility testing** with contrast ratio info in the hover tooltip and a dedicated Activity Bar report view
 
 ![](img/screen1.png) 
  
@@ -24,6 +24,16 @@ Adds color indicators and mouseover information anywhere a common color code is 
 2.  Look for the inline color indicator next to recognized color codes
 3.  Hover over the color swatch or code to open vscode's tooltip and display color details
 4.  When hovering a color definition, the tooltip will contain VS Codes colorpicker enchanced with color information.
+
+### Accessibility Report Panel
+
+Run `ColorBuddy: Test Color Accessibility` (or fire the quick action from any color hover) to open the ColorBuddy Activity Bar view. The new panel surfaces:
+
+* Detailed WCAG contrast checks against light and dark backgrounds
+* Color name, hex, and brightness metadata sourced from the hover insights
+* Alternate format conversions you can copy directly
+
+Click the ColorBuddy icon in the Activity Bar at any time to revisit the latest report.
 
 ## Supported Color Formats
 
