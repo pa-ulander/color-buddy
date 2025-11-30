@@ -127,14 +127,20 @@ export class Provider {
     /**
      * Append a divider at the end of tooltip content
      */
-    private appendTooltipFooter(markdown: vscode.MarkdownString, data: ColorData, conversions?: FormatConversion[]): void {
+    private appendTooltipFooter(
+        markdown: vscode.MarkdownString,
+        data: ColorData,
+        conversions?: FormatConversion[],
+        options?: { preferredCopyValue?: string }
+    ): void {
         const primaryConversion = conversions?.[0];
+        const preferredValue = options?.preferredCopyValue?.trim();
         const payload: CopyColorCommandPayload | undefined = (() => {
-            const value = primaryConversion?.value ?? data.normalizedColor ?? data.originalText;
+            const value = preferredValue ?? primaryConversion?.value ?? data.normalizedColor ?? data.originalText;
             if (!value) {
                 return undefined;
             }
-            const format = primaryConversion?.format ?? data.format;
+            const format = preferredValue ? data.format : primaryConversion?.format ?? data.format;
             return {
                 value,
                 format,
@@ -281,6 +287,7 @@ export class Provider {
         const rootDecl = sorted.find(d => d.context.type === 'root');
         const darkDecl = sorted.find(d => d.context.themeHint === 'dark');
         const lightDecl = sorted.find(d => d.context.themeHint === 'light');
+            const preferredCopyValue = (rootDecl ?? sorted[0])?.value?.trim();
         
         if (!data.isTailwindClass) {
             markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_VARIABLE)}:** \`${data.variableName}\`\n\n`);
@@ -332,7 +339,7 @@ export class Provider {
         this.recordHoverTelemetry(data, usageCount, report);
         this.appendMetricsSection(markdown, data, usageCount, report);
         const conversions = this.appendFormatConversions(markdown, data.vscodeColor, data.format);
-        this.appendTooltipFooter(markdown, data, conversions);
+            this.appendTooltipFooter(markdown, data, conversions, { preferredCopyValue });
     }
 
     /**

@@ -1296,18 +1296,7 @@ export class ExtensionController implements vscode.Disposable {
 
 		appendFormatConversionList(markdown, conversions, { surface: 'statusBar' });
 
-		const copyPayload: CopyColorCommandPayload | undefined = (() => {
-			const primaryConversion = conversions[0];
-			const value = primaryConversion?.value ?? primaryValue;
-			if (!value) {
-				return undefined;
-			}
-			return {
-				value,
-				format: primaryConversion?.format,
-				source: 'statusBar'
-			};
-		})();
+		const copyPayload = this.buildQuickActionCopyPayload(data, conversions, primaryValue);
 
 		const overrides = copyPayload
 			? {
@@ -1320,6 +1309,39 @@ export class ExtensionController implements vscode.Disposable {
 		appendQuickActions(markdown, { surface: 'statusBar', overrides });
 
 		return markdown;
+	}
+
+	private buildQuickActionCopyPayload(
+		data: ColorData,
+		conversions: FormatConversion[],
+		fallbackValue?: string
+	): CopyColorCommandPayload | undefined {
+		const preferredValue = this.getCssVariableDeclarationValue(data);
+		const primaryConversion = conversions[0];
+		const value = preferredValue ?? primaryConversion?.value ?? fallbackValue ?? data.normalizedColor ?? data.originalText;
+		if (!value) {
+			return undefined;
+		}
+		const format = preferredValue ? data.format : primaryConversion?.format ?? data.format;
+		return {
+			value,
+			format,
+			source: 'statusBar'
+		};
+	}
+
+	private getCssVariableDeclarationValue(data: ColorData): string | undefined {
+		if (!data.isCssVariable || !data.variableName) {
+			return undefined;
+		}
+		const declarations = this.registry.getVariable(data.variableName);
+		if (!declarations || declarations.length === 0) {
+			return undefined;
+		}
+		const sorted = [...declarations].sort((a, b) => a.context.specificity - b.context.specificity);
+		const rootDecl = sorted.find(decl => decl.context.type === 'root');
+		const target = rootDecl ?? sorted[0];
+		return target?.value?.trim();
 	}
 
 	private appendCssVariableContexts(markdown: vscode.MarkdownString, data: ColorData): void {
