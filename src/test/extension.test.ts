@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
 	createMockDocument,
+	createMockCSSVariableDeclaration,
 	assertLength,
 	assertDefined
 } from './helpers';
@@ -288,6 +289,95 @@ suite('Default language literal pipeline', () => {
 		});
 	});
 
+	suite('Quick action payload values', () => {
+		test('hover copy action uses CSS variable declaration value', async () => {
+			registry.clear();
+			const variableUri = vscode.Uri.parse('file:///workspace/palette.css');
+			registry.addVariable(
+				'--chart-1',
+				createMockCSSVariableDeclaration('--chart-1', '12 76% 61%', {
+					uri: variableUri,
+					context: { type: 'root', specificity: 0 }
+				})
+			);
+
+			const document = createMockDocument('div { color: hsl(var(--chart-1)); }', 'css');
+			const colorData = colorDetector.collectColorData(document, document.getText());
+			const variableColor = colorData.find(data => data.isCssVariable && data.variableName === '--chart-1');
+			assertDefined(variableColor, 'expected CSS variable color data');
+
+			const hover = await provider.provideHover(colorData, variableColor.range.start);
+			assertDefined(hover, 'expected hover result for CSS variable');
+			const hoverMarkdown = hover!.contents[0] as vscode.MarkdownString;
+			const payloads = extractQuickActionPayloads(hoverMarkdown);
+			const copyPayload = payloads.find(payload => payload.target === 'colorbuddy.copyColorAs');
+			assertDefined(copyPayload, 'expected copy quick action payload');
+			assert.ok(Array.isArray(copyPayload!.args), 'expected quick action args to exist');
+			const payloadArg = copyPayload!.args[0];
+			assert.strictEqual(payloadArg.value, '12 76% 61%', 'copy payload should include raw CSS variable value');
+		});
+
+		test('status bar copy action uses CSS variable declaration value', () => {
+			registry.clear();
+			const variableUri = vscode.Uri.parse('file:///workspace/palette.css');
+			const declaration = createMockCSSVariableDeclaration('--chart-1', '12 76% 61%', {
+				uri: variableUri,
+				context: { type: 'root', specificity: 0 }
+			});
+			registry.addVariable('--chart-1', declaration);
+
+			const restoreConfig = stubWorkspaceLanguages(['css']);
+			const controller = new ExtensionController({ subscriptions: [] } as unknown as vscode.ExtensionContext);
+			const controllerRegistry = (controller as unknown as { registry: Registry }).registry;
+			controllerRegistry.addVariable('--chart-1', { ...declaration });
+
+			try {
+				const document = createMockDocument('div { color: hsl(var(--chart-1)); }', 'css');
+				const colorData = colorDetector.collectColorData(document, document.getText());
+				const variableColor = colorData.find(data => data.isCssVariable && data.variableName === '--chart-1');
+				assertDefined(variableColor, 'expected CSS variable color data for status bar');
+
+				const providerInstance = (controller as unknown as { provider: Provider }).provider;
+				const report = providerInstance.getAccessibilityReport(variableColor.vscodeColor);
+				const contrastMetrics = (controller as unknown as {
+					extractContrastMetrics(report: AccessibilityReport): { contrastWhite?: any; contrastBlack?: any };
+				}).extractContrastMetrics.call(controller, report);
+				const conversions = collectFormatConversions(colorParser, colorFormatter, variableColor.vscodeColor, variableColor.format);
+				const buildTooltip = (controller as unknown as {
+					buildStatusBarTooltip(
+						data: any,
+						primaryValue: string,
+						metrics: any,
+						report: AccessibilityReport,
+						conversions: any
+					): vscode.MarkdownString;
+				}).buildStatusBarTooltip.bind(controller);
+				const primaryValue = conversions[0]?.value ?? variableColor.normalizedColor;
+				const tooltip = buildTooltip(
+					variableColor,
+					primaryValue,
+					{
+						usageCount: 1,
+						contrastWhite: contrastMetrics.contrastWhite,
+						contrastBlack: contrastMetrics.contrastBlack
+					},
+					report,
+					conversions
+				);
+
+				const payloads = extractQuickActionPayloads(tooltip);
+				const copyPayload = payloads.find(payload => payload.target === 'colorbuddy.copyColorAs');
+				assertDefined(copyPayload, 'expected status bar copy payload');
+				assert.ok(Array.isArray(copyPayload!.args), 'expected status bar quick action args');
+				const payloadArg = copyPayload!.args[0];
+				assert.strictEqual(payloadArg.value, '12 76% 61%', 'status bar copy payload should use raw CSS variable value');
+			} finally {
+				controller.dispose();
+				restoreConfig();
+			}
+		});
+	});
+
 	suite('Quick action command', () => {
 		test('tracks quick action telemetry when opt-in is enabled', async () => {
 			const restoreConfig = stubWorkspaceLanguages(['plaintext'], { enableTelemetry: true });
@@ -446,6 +536,12 @@ suite('Cache behaviour', () => {
 		}
 	});
 });
+
+function extractQuickActionPayloads(markdown: vscode.MarkdownString): any[] {
+	const regex = /command:colorbuddy\.executeQuickAction\?([^"\)\]]+)/g;
+	const matches = markdown.value.matchAll(regex);
+	return Array.from(matches, match => JSON.parse(decodeURIComponent(match[1])));
+}
 
 function stubExecuteCommand<T>(result: T): () => void {
 	const original = vscode.commands.executeCommand;
