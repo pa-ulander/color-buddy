@@ -8,3 +8,4 @@ node_modules
 out
 src/backup
 .env
+graphics
