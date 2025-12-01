@@ -16,6 +16,7 @@ import type {
 import { collectFormatConversions, appendFormatConversionList, FormatConversion } from '../utils/colorFormatConversions';
 import { appendQuickActions } from '../utils/quickActions';
 import { buildConvertColorCommandPayload } from '../utils/commandPayloads';
+import { buildAccessibilityMetadata } from '../utils/accessibilityMetadata';
 import { getColorUsageCount } from '../utils/colorUsage';
 import { getColorInsights } from '../utils/colorInsights';
 import { appendWcagStatusSection } from '../utils/accessibilityFormatting';
@@ -139,7 +140,7 @@ export class Provider {
         markdown: vscode.MarkdownString,
         data: ColorData,
         conversions?: FormatConversion[],
-        options?: { preferredCopyValue?: string }
+        options?: { preferredCopyValue?: string; usageCount?: number }
     ): void {
         const primaryConversion = conversions?.[0];
         const preferredValue = options?.preferredCopyValue?.trim();
@@ -157,12 +158,14 @@ export class Provider {
         })();
 
         const convertPayload = buildConvertColorCommandPayload(data, 'hover');
+        const metadata = buildAccessibilityMetadata(data, options?.usageCount);
         const accessibilityPayload: TestAccessibilityCommandPayload | undefined = data.normalizedColor
             ? {
                     value: data.normalizedColor,
                     format: data.format,
                     source: 'hover',
-                    label: data.originalText
+                label: data.originalText,
+                metadata
                 }
             : undefined;
 
@@ -262,7 +265,7 @@ export class Provider {
         this.recordHoverTelemetry(data, usageCount, report);
         this.appendMetricsSection(markdown, data, usageCount, report);
         const conversions = this.appendFormatConversions(markdown, data.vscodeColor, data.format);
-        this.appendTooltipFooter(markdown, data, conversions);
+        this.appendTooltipFooter(markdown, data, conversions, { usageCount });
     }
 
     /**
@@ -272,6 +275,7 @@ export class Provider {
         if (!data.variableName) {
             return;
         }
+        const usageCount = getColorUsageCount(colorData, data);
         const declarations = this.registry.getVariable(data.variableName);
         
         if (!declarations || declarations.length === 0) {
@@ -281,7 +285,7 @@ export class Provider {
             markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_VARIABLE)}:** \`${data.variableName}\`\n\n`);
             markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_VARIABLE_NOT_FOUND_MESSAGE)}\n\n`);
             markdown.appendMarkdown(`*${t(LocalizedStrings.TOOLTIP_VARIABLE_NOT_FOUND_HINT)}*\n\n`);
-            this.appendTooltipFooter(markdown, data);
+            this.appendTooltipFooter(markdown, data, undefined, { usageCount });
             return;
         }
 
@@ -308,7 +312,7 @@ export class Provider {
         const rootDecl = sorted.find(d => d.context.type === 'root');
         const darkDecl = sorted.find(d => d.context.themeHint === 'dark');
         const lightDecl = sorted.find(d => d.context.themeHint === 'light');
-            const preferredCopyValue = (rootDecl ?? sorted[0])?.value?.trim();
+        const preferredCopyValue = (rootDecl ?? sorted[0])?.value?.trim();
         
         if (!data.isTailwindClass) {
             markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_VARIABLE)}:** \`${data.variableName}\`\n\n`);
@@ -355,12 +359,11 @@ export class Provider {
             markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_DEFINED_IN)} [${vscode.workspace.asRelativePath(darkDecl.uri)}:${darkDecl.line + 1}](${darkDecl.uri.toString()}#L${darkDecl.line + 1})\n\n`);
         }
 
-        const usageCount = getColorUsageCount(colorData, data);
         const report = this.getAccessibilityReport(data.vscodeColor);
         this.recordHoverTelemetry(data, usageCount, report);
         this.appendMetricsSection(markdown, data, usageCount, report);
         const conversions = this.appendFormatConversions(markdown, data.vscodeColor, data.format);
-            this.appendTooltipFooter(markdown, data, conversions, { preferredCopyValue });
+        this.appendTooltipFooter(markdown, data, conversions, { preferredCopyValue, usageCount });
     }
 
     /**
@@ -409,7 +412,7 @@ export class Provider {
         this.recordHoverTelemetry(data, usageCount, report);
         this.appendMetricsSection(markdown, data, usageCount, report);
         const conversions = this.appendFormatConversions(markdown, data.vscodeColor, data.format);
-        this.appendTooltipFooter(markdown, data, conversions);
+        this.appendTooltipFooter(markdown, data, conversions, { usageCount });
     }
 
     /**
