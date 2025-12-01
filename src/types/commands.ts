@@ -29,9 +29,17 @@ export interface ConvertColorCommandPayload {
 	source?: ConvertColorCommandSource;
 }
 
+export interface TestAccessibilityCommandMetadata {
+	usageCount?: number;
+	variableName?: string;
+	tailwindClass?: string;
+	cssClassName?: string;
+}
+
 export interface TestAccessibilityCommandPayload {
 	value: string;
 	format?: ColorFormat;
 	source?: CopyColorCommandSource;
 	label?: string;
+	metadata?: TestAccessibilityCommandMetadata;
 }
