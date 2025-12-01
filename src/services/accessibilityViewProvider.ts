@@ -329,18 +329,100 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 		`;
 	}
 
-	private renderSummarySection(_data: AccessibilityViewData): string {
-		return `
+	private renderSummarySection(data: AccessibilityViewData): string {
+		// Render the complete tooltip-style summary
+		return this.renderTooltipStyleSummary(data);
+	}
+
+	private renderTooltipStyleSummary(data: AccessibilityViewData): string {
+		const parts: string[] = [];
+
+		// Header section - mimics tooltip header
+		const headerType = data.cssVariableName 
+			? t(LocalizedStrings.TOOLTIP_CSS_VARIABLE)
+			: data.tailwindClass
+			? t(LocalizedStrings.TOOLTIP_TAILWIND_CLASS)
+			: data.cssClassName
+			? t(LocalizedStrings.TOOLTIP_CSS_CLASS)
+			: t(LocalizedStrings.TOOLTIP_COLOR_PREVIEW);
+
+		parts.push(`
 			<section class="cb-card">
-				<header class="cb-section-header">
-					<div>
-						<p class="cb-eyebrow">${this.escapeHtml(t(LocalizedStrings.TOOLTIP_ACCESSIBILITY))}</p>
-						<h2>${this.escapeHtml(t(LocalizedStrings.ACCESSIBILITY_VIEW_SUMMARY_MOVED_TITLE))}</h2>
+				<h2>${this.escapeHtml(headerType)}</h2>
+				<div class="cb-section-header">
+					<div class="cb-swatch" style="background:${this.escapeHtml(data.normalizedColor)}"></div>
+					<div style="flex: 1;">
+						<code style="font-size: 1rem;">${this.escapeHtml(data.label)}</code>
 					</div>
-				</header>
-				<p>${this.escapeHtml(t(LocalizedStrings.ACCESSIBILITY_VIEW_SUMMARY_MOVED_BODY))}</p>
-			</section>
-		`;
+				</div>
+		`);
+
+		// Variable name for CSS variables
+		if (data.cssVariableName) {
+			parts.push(`<p><strong>${this.escapeHtml(t(LocalizedStrings.TOOLTIP_VARIABLE))}:</strong> <code>${this.escapeHtml(data.cssVariableName)}</code></p>`);
+		}
+
+		// Color insights
+		parts.push(`
+			<p><strong>${this.escapeHtml(t(LocalizedStrings.TOOLTIP_COLOR_NAME))}:</strong> ${this.escapeHtml(data.colorName)} (<code>${this.escapeHtml(data.colorHex)}</code>)</p>
+			<p><strong>${this.escapeHtml(t(LocalizedStrings.TOOLTIP_BRIGHTNESS))}:</strong> ${data.brightness}%</p>
+		`);
+
+		// Variable contexts if applicable
+		if (data.variableContexts && data.variableContexts.length > 0) {
+			parts.push(`<hr style="margin: 1rem 0; border: none; border-top: 1px solid var(--vscode-sideBarSectionHeader-border);">`);
+			for (const context of data.variableContexts) {
+				const swatchStyle = `display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: ${this.escapeHtml(context.resolvedValue)}; border: 1px solid var(--vscode-sideBar-foreground); margin-right: 0.5rem; vertical-align: middle;`;
+				parts.push(`
+					<p>
+						<span style="${swatchStyle}"></span>
+						<strong>${this.escapeHtml(context.label)}:</strong> <code>${this.escapeHtml(context.resolvedValue)}</code>
+					</p>
+					<p style="font-size: 0.85rem; color: var(--vscode-descriptionForeground); margin-left: 1.5rem;">
+						${this.escapeHtml(t(LocalizedStrings.TOOLTIP_DEFINED_IN))} ${this.escapeHtml(context.location)}
+					</p>
+				`);
+			}
+		}
+
+		// Usage count
+		if (typeof data.usageCount === 'number') {
+			parts.push(`<hr style="margin: 1rem 0; border: none; border-top: 1px solid var(--vscode-sideBarSectionHeader-border);">`);
+			parts.push(`<p><strong>${this.escapeHtml(t(LocalizedStrings.STATUS_BAR_USAGE_COUNT))}:</strong> ${data.usageCount}</p>`);
+		}
+
+		// WCAG Status section
+		parts.push(`<hr style="margin: 1rem 0; border: none; border-top: 1px solid var(--vscode-sideBarSectionHeader-border);">`);
+		parts.push(`<p><strong>${this.escapeHtml(t(LocalizedStrings.TOOLTIP_WCAG_STATUS))}:</strong></p>`);
+		parts.push(`<p style="font-size: 0.9rem;"><strong>${this.escapeHtml(t(LocalizedStrings.TOOLTIP_COLOR))}:</strong> <code>${this.escapeHtml(data.normalizedColor)}</code></p>`);
+
+		// Contrast checks
+		for (const sample of data.report.samples) {
+			const ratio = sample.contrastRatio.toFixed(2);
+			parts.push(`<p style="margin-top: 0.75rem;"><strong>${this.escapeHtml(sample.label)} (${ratio}:1):</strong></p>`);
+			parts.push(`<ul style="list-style: none; padding-left: 0; margin: 0.25rem 0;">`);
+			for (const check of sample.checks) {
+				const icon = check.outcome === 'pass' ? '✓' : '✗';
+				const color = check.outcome === 'pass' ? '#22c55e' : '#ef4444';
+				parts.push(`<li style="margin: 0.15rem 0;"><span style="color: ${color}; font-weight: bold;">${icon}</span> ${this.escapeHtml(check.label)}</li>`);
+			}
+			parts.push(`</ul>`);
+		}
+
+		// Available formats
+		if (data.conversions.length > 0) {
+			parts.push(`<hr style="margin: 1rem 0; border: none; border-top: 1px solid var(--vscode-sideBarSectionHeader-border);">`);
+			parts.push(`<p><strong>${this.escapeHtml(t(LocalizedStrings.TOOLTIP_FORMATS_AVAILABLE))}:</strong></p>`);
+			parts.push(`<ul class="cb-list">`);
+			for (const conversion of data.conversions) {
+				parts.push(`<li><code>${this.escapeHtml(conversion.value)}</code></li>`);
+			}
+			parts.push(`</ul>`);
+		}
+
+		parts.push(`</section>`);
+		
+		return parts.join('\n');
 	}
 
 	private renderSummaryCard(data: AccessibilityViewData): string {
