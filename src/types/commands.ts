@@ -43,3 +43,10 @@ export interface TestAccessibilityCommandPayload {
 	label?: string;
 	metadata?: TestAccessibilityCommandMetadata;
 }
+
+export interface FindUsagesCommandPayload {
+	value: string;
+	format?: ColorFormat;
+	source?: CopyColorCommandSource;
+	label?: string;
+}
