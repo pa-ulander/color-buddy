@@ -36,11 +36,17 @@ import { collectFormatConversions, getFormatLabel, appendFormatConversionList } 
 import type { FormatConversion } from '../utils/colorFormatConversions';
 import { appendQuickActions, EXECUTE_QUICK_ACTION_COMMAND, QuickActionLinkPayload } from '../utils/quickActions';
 import { buildConvertColorCommandPayload } from '../utils/commandPayloads';
+import { buildAccessibilityMetadata } from '../utils/accessibilityMetadata';
 import { Telemetry, buildContrastTelemetry, ColorInsightColorKind } from './telemetry';
 import { getColorUsageCount } from '../utils/colorUsage';
 import { getColorInsights } from '../utils/colorInsights';
 import { appendWcagStatusSection } from '../utils/accessibilityFormatting';
-import { AccessibilityViewProvider, type AccessibilityReportPresenter, type AccessibilityViewData } from './accessibilityViewProvider';
+import {
+	AccessibilityViewProvider,
+	type AccessibilityReportPresenter,
+	type AccessibilityViewData,
+	type AccessibilityVariableContext
+} from './accessibilityViewProvider';
 
 const CSS_LIKE_LANGUAGES = new Set([
 	'css',
@@ -69,7 +75,6 @@ const CSS_LIKE_FILE_EXTENSIONS = new Set([
 
 const SASS_FILE_EXTENSIONS = new Set(['.sass']);
 const MAX_COLOR_USAGE_RESULTS = 200;
-const ACCESSIBILITY_VIEW_ID = 'colorbuddy.accessibilityReport';
 const COLORBUDDY_CONTAINER_COMMAND = 'workbench.view.extension.colorbuddy';
 
 interface ColorUsageMatch {
@@ -97,11 +102,23 @@ interface ContrastSummary {
 	level: string;
 }
 
+interface VariableContextSummary {
+	label: string;
+	value: string;
+	resolvedValue: string;
+	location: string;
+	uri: vscode.Uri;
+	line: number;
+}
+
 interface AccessibilityCommandColorContext {
 	vscodeColor: vscode.Color;
 	label: string;
 	normalizedColor: string;
 	format?: ColorFormat;
+	activeColor?: ColorData;
+	colorData?: ColorData[];
+	metadata?: TestAccessibilityCommandPayload['metadata'];
 }
 
 /**
@@ -140,15 +157,6 @@ export class ExtensionController implements vscode.Disposable {
 		this.accessibilityViewProvider = new AccessibilityViewProvider(this.context.extensionUri);
 		this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 		this.statusBarItem.name = 'ColorBuddy Active Color';
-		const statusBarPayload: QuickActionLinkPayload = {
-			target: 'colorbuddy.showColorPalette',
-			source: 'statusBar'
-		};
-		this.statusBarItem.command = {
-			command: EXECUTE_QUICK_ACTION_COMMAND,
-			title: t(LocalizedStrings.COMMAND_QUICK_ACTION_PALETTE),
-			arguments: [statusBarPayload]
-		};
 		this.disposables.push(this.telemetry);
 	}
 
@@ -443,6 +451,11 @@ export class ExtensionController implements vscode.Disposable {
 			const report = this.provider.getAccessibilityReport(context.vscodeColor);
 			const conversions = collectFormatConversions(this.colorParser, this.colorFormatter, context.vscodeColor, context.format);
 			const insights = getColorInsights(context.vscodeColor);
+			const usageCount = this.resolveUsageCount(context);
+			const cssVariableName = this.resolveCssVariableName(context);
+			const variableContexts = cssVariableName ? this.getVariableContextSummaries(cssVariableName) : [];
+			const tailwindClass = context.activeColor?.tailwindClass ?? context.metadata?.tailwindClass;
+			const cssClassName = context.activeColor?.cssClassName ?? context.metadata?.cssClassName;
 			const data: AccessibilityViewData = {
 				label: context.label || context.normalizedColor,
 				normalizedColor: context.normalizedColor,
@@ -450,7 +463,12 @@ export class ExtensionController implements vscode.Disposable {
 				colorHex: insights.hex,
 				brightness: insights.brightness,
 				report,
-				conversions
+				conversions,
+				usageCount,
+				cssVariableName,
+				tailwindClass,
+				cssClassName,
+				variableContexts: variableContexts.length ? variableContexts : undefined
 			};
 
 			await this.presentAccessibilityReport(data);
@@ -471,7 +489,8 @@ export class ExtensionController implements vscode.Disposable {
 				vscodeColor: parsed.vscodeColor,
 				label: payload.label ?? payload.value,
 				normalizedColor: parsed.cssString,
-				format: payload.format ?? parsed.formatPriority[0]
+				format: payload.format ?? parsed.formatPriority[0],
+				metadata: payload.metadata
 			};
 		}
 
@@ -492,7 +511,10 @@ export class ExtensionController implements vscode.Disposable {
 			vscodeColor: activeColor.vscodeColor,
 			label: activeColor.originalText,
 			normalizedColor: activeColor.normalizedColor ?? activeColor.originalText,
-			format: activeColor.format
+			format: activeColor.format,
+			activeColor,
+			colorData,
+			metadata: buildAccessibilityMetadata(activeColor)
 		};
 	}
 
@@ -881,13 +903,15 @@ export class ExtensionController implements vscode.Disposable {
 	}
 
 	private registerViewProviders(): void {
-		const accessibilityView = vscode.window.registerWebviewViewProvider(ACCESSIBILITY_VIEW_ID, this.accessibilityViewProvider, {
-			webviewOptions: {
-				retainContextWhenHidden: true
-			}
-		});
-		this.context.subscriptions.push(accessibilityView);
-		this.disposables.push(accessibilityView);
+		for (const provider of this.accessibilityViewProvider.getSectionProviders()) {
+			const registration = vscode.window.registerWebviewViewProvider(provider.viewId, provider, {
+				webviewOptions: {
+					retainContextWhenHidden: true
+				}
+			});
+			this.context.subscriptions.push(registration);
+			this.disposables.push(registration);
+		}
 	}
 
 	/**
@@ -1431,13 +1455,15 @@ export class ExtensionController implements vscode.Disposable {
 
 		const copyPayload = this.buildQuickActionCopyPayload(data, conversions, primaryValue);
 		const convertPayload = buildConvertColorCommandPayload(data, 'statusBar');
+		const metadata = buildAccessibilityMetadata(data, metrics.usageCount);
 		const accessibilityPayload: TestAccessibilityCommandPayload | undefined = data.normalizedColor
 			? {
-					value: data.normalizedColor,
-					format: data.format,
-					source: 'statusBar',
-					label: data.originalText
-				}
+				value: data.normalizedColor,
+				format: data.format,
+				source: 'statusBar',
+				label: data.originalText,
+				metadata
+			  }
 			: undefined;
 
 		const overrides: Record<string, { args?: unknown[] }> = {};
@@ -1476,6 +1502,76 @@ export class ExtensionController implements vscode.Disposable {
 		};
 	}
 
+	private resolveUsageCount(context: AccessibilityCommandColorContext): number | undefined {
+		if (context.activeColor && context.colorData) {
+			return getColorUsageCount(context.colorData, context.activeColor);
+		}
+		return context.metadata?.usageCount;
+	}
+
+	private resolveCssVariableName(context: AccessibilityCommandColorContext): string | undefined {
+		if (context.activeColor?.variableName) {
+			return context.activeColor.variableName;
+		}
+		return context.metadata?.variableName;
+	}
+
+	private getVariableContextSummaries(variableName: string): AccessibilityVariableContext[] {
+		return this.collectVariableContextEntries(variableName).map(entry => ({
+			label: entry.label,
+			value: entry.value,
+			resolvedValue: entry.resolvedValue,
+			location: entry.location
+		}));
+	}
+
+	private collectVariableContextEntries(variableName: string): VariableContextSummary[] {
+		const declarations = this.registry.getVariable(variableName);
+		if (!declarations || declarations.length === 0) {
+			return [];
+		}
+		const sorted = [...declarations].sort((a, b) => a.context.specificity - b.context.specificity);
+		const entries: VariableContextSummary[] = [];
+		const seen = new Set<CSSVariableDeclaration>();
+		const pushEntry = (declaration: CSSVariableDeclaration, label: string) => {
+			const resolved = declaration.resolvedValue ?? this.cssParser.resolveNestedVariables(declaration.value);
+			const location = `${vscode.workspace.asRelativePath(declaration.uri)}:${declaration.line + 1}`;
+			entries.push({
+				label,
+				value: declaration.value?.trim() ?? resolved,
+				resolvedValue: resolved,
+				location,
+				uri: declaration.uri,
+				line: declaration.line
+			});
+			seen.add(declaration);
+		};
+
+		const rootDecl = sorted.find(decl => decl.context.type === 'root');
+		const lightDecl = sorted.find(decl => decl.context.themeHint === 'light');
+		const darkDecl = sorted.find(decl => decl.context.themeHint === 'dark');
+
+		if (rootDecl) {
+			pushEntry(rootDecl, t(LocalizedStrings.TOOLTIP_DEFAULT_THEME));
+		}
+		if (lightDecl && lightDecl !== rootDecl) {
+			pushEntry(lightDecl, t(LocalizedStrings.TOOLTIP_LIGHT_THEME));
+		}
+		if (darkDecl && darkDecl !== rootDecl) {
+			pushEntry(darkDecl, t(LocalizedStrings.TOOLTIP_DARK_THEME));
+		}
+
+		for (const declaration of sorted) {
+			if (seen.has(declaration)) {
+				continue;
+			}
+			const label = declaration.selector?.trim() || t(LocalizedStrings.TOOLTIP_VARIABLE);
+			pushEntry(declaration, label);
+		}
+
+		return entries;
+	}
+
 	private getCssVariableDeclarationValue(data: ColorData): string | undefined {
 		if (!data.isCssVariable || !data.variableName) {
 			return undefined;
@@ -1494,37 +1590,21 @@ export class ExtensionController implements vscode.Disposable {
 		if (!data.isCssVariable || !data.variableName) {
 			return;
 		}
-		const declarations = this.registry.getVariable(data.variableName);
-		if (!declarations || declarations.length === 0) {
-			return;
-		}
-
-		const sorted = [...declarations].sort((a, b) => a.context.specificity - b.context.specificity);
-		const rootDecl = sorted.find(decl => decl.context.type === 'root');
-		const lightDecl = sorted.find(decl => decl.context.themeHint === 'light');
-		const darkDecl = sorted.find(decl => decl.context.themeHint === 'dark');
-
-		if (rootDecl) {
-			this.appendVariableDeclaration(markdown, rootDecl, t(LocalizedStrings.TOOLTIP_DEFAULT_THEME));
-		}
-		if (lightDecl && lightDecl !== rootDecl) {
-			this.appendVariableDeclaration(markdown, lightDecl, t(LocalizedStrings.TOOLTIP_LIGHT_THEME));
-		}
-		if (darkDecl) {
-			this.appendVariableDeclaration(markdown, darkDecl, t(LocalizedStrings.TOOLTIP_DARK_THEME));
+		const contexts = this.collectVariableContextEntries(data.variableName);
+		for (const context of contexts) {
+			this.appendVariableContext(markdown, context);
 		}
 	}
 
-	private appendVariableDeclaration(markdown: vscode.MarkdownString, declaration: CSSVariableDeclaration, label: string): void {
-		const resolved = declaration.resolvedValue ?? this.cssParser.resolveNestedVariables(declaration.value);
-		const parsed = this.colorParser.parseColor(resolved);
+	private appendVariableContext(markdown: vscode.MarkdownString, context: VariableContextSummary): void {
+		const parsed = this.colorParser.parseColor(context.resolvedValue);
 		if (parsed) {
 			const swatchUri = this.createColorSwatchDataUri(parsed.cssString);
-			markdown.appendMarkdown(`![color swatch](${swatchUri}) **${label}:** \`${resolved}\`\n\n`);
+			markdown.appendMarkdown(`![color swatch](${swatchUri}) **${context.label}:** \`${context.resolvedValue}\`\n\n`);
 		} else {
-			markdown.appendMarkdown(`**${label}:** \`${resolved}\`\n\n`);
+			markdown.appendMarkdown(`**${context.label}:** \`${context.resolvedValue}\`\n\n`);
 		}
-		markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_DEFINED_IN)} [${vscode.workspace.asRelativePath(declaration.uri)}:${declaration.line + 1}](${declaration.uri.toString()}#L${declaration.line + 1})\n\n`);
+		markdown.appendMarkdown(`${t(LocalizedStrings.TOOLTIP_DEFINED_IN)} [${context.location}](${context.uri.toString()}#L${context.line + 1})\n\n`);
 	}
 
 	private createColorSwatchDataUri(color: string): string {
