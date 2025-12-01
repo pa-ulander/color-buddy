@@ -117,6 +117,8 @@ export const LocalizedStrings = {
 	ACCESSIBILITY_VIEW_EMPTY_CONTEXTS: 'No CSS variable contexts are available for this color.',
 	ACCESSIBILITY_VIEW_EMPTY_FORMATS: 'No alternate color formats are available for this color.',
 	ACCESSIBILITY_VIEW_TEST_RESULTS_TITLE: 'Accessibility test results',
+	ACCESSIBILITY_VIEW_SUMMARY_MOVED_TITLE: 'Summary available in WCAG panel',
+	ACCESSIBILITY_VIEW_SUMMARY_MOVED_BODY: 'Open the WCAG panel to review the latest summary, contrast checks, and context details for this color.',
 	COMMAND_TEST_ACCESSIBILITY_TITLE: 'Test Color Accessibility',
 	COMMAND_TEST_ACCESSIBILITY_NO_EDITOR: 'Open a file to test color accessibility.',
 	COMMAND_TEST_ACCESSIBILITY_NO_COLOR: 'Place the cursor on a color before testing accessibility.',

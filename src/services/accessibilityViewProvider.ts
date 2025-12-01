@@ -31,6 +31,7 @@ export interface AccessibilityReportPresenter extends vscode.WebviewViewProvider
 	readonly viewId: string;
 	updateReport(data: AccessibilityViewData): void;
 	reveal(preserveFocus?: boolean): void;
+	revealSection(section: AccessibilityPanelSection, preserveFocus?: boolean): void;
 	getSectionProviders(): AccessibilitySectionProvider[];
 	getLastRenderedData(): AccessibilityViewData | null;
 }
@@ -79,12 +80,20 @@ export class AccessibilityViewProvider implements AccessibilityReportPresenter {
 		}
 	}
 
+	revealSection(section: AccessibilityPanelSection, preserveFocus?: boolean): void {
+		const provider = this.providers[section];
+		if (!provider) {
+			return;
+		}
+		provider.reveal(preserveFocus);
+	}
+
 	getLastRenderedData(): AccessibilityViewData | null {
 		return this.lastRenderedData;
 	}
 
 	reveal(preserveFocus?: boolean): void {
-		this.providers.summary.reveal(preserveFocus);
+		this.revealSection('summary', preserveFocus);
 	}
 }
 
@@ -121,7 +130,11 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 	}
 
 	reveal(preserveFocus?: boolean): void {
-		this.view?.show?.(preserveFocus);
+		if (this.view) {
+			this.view.show?.(preserveFocus);
+			return;
+		}
+		void vscode.commands.executeCommand(`${this.viewId}.focus`);
 	}
 
 	private render(view: vscode.WebviewView, data: AccessibilityViewData | null): void {
@@ -316,13 +329,18 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 		`;
 	}
 
-	private renderSummarySection(data: AccessibilityViewData): string {
-		const stack = [
-			this.renderSummaryCard(data),
-			this.renderContrastSection(data, { embed: true }),
-			this.renderContextsSection(data, { embed: true })
-		].filter(Boolean).join('\n');
-		return `<div class="cb-stack">${stack}</div>`;
+	private renderSummarySection(_data: AccessibilityViewData): string {
+		return `
+			<section class="cb-card">
+				<header class="cb-section-header">
+					<div>
+						<p class="cb-eyebrow">${this.escapeHtml(t(LocalizedStrings.TOOLTIP_ACCESSIBILITY))}</p>
+						<h2>${this.escapeHtml(t(LocalizedStrings.ACCESSIBILITY_VIEW_SUMMARY_MOVED_TITLE))}</h2>
+					</div>
+				</header>
+				<p>${this.escapeHtml(t(LocalizedStrings.ACCESSIBILITY_VIEW_SUMMARY_MOVED_BODY))}</p>
+			</section>
+		`;
 	}
 
 	private renderSummaryCard(data: AccessibilityViewData): string {
@@ -358,8 +376,28 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 	}
 
 	private renderContrastSection(data: AccessibilityViewData, options?: SectionRenderOptions): string {
+		const contrastBody = this.renderContrastBody(data, options);
+		if (options?.embed) {
+			return contrastBody;
+		}
+
+		const stack: string[] = [];
+		stack.push(this.renderSummaryCard(data));
+		if (contrastBody) {
+			stack.push(contrastBody);
+		} else {
+			stack.push(this.renderEmptyState(t(LocalizedStrings.ACCESSIBILITY_VIEW_EMPTY_CONTRAST)));
+		}
+		const contexts = this.renderContextsSection(data, { embed: true });
+		if (contexts) {
+			stack.push(contexts);
+		}
+		return `<div class="cb-stack">${stack.join('\n')}</div>`;
+	}
+
+	private renderContrastBody(data: AccessibilityViewData, options?: SectionRenderOptions): string {
 		if (!data.report.samples.length) {
-			return options?.embed ? '' : this.renderEmptyState(t(LocalizedStrings.ACCESSIBILITY_VIEW_EMPTY_CONTRAST));
+			return options?.embed ? '' : '';
 		}
 		const details = data.report.samples.map((sample, index) => {
 			const ratio = sample.contrastRatio.toFixed(2);

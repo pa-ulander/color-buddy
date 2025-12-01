@@ -522,7 +522,7 @@ export class ExtensionController implements vscode.Disposable {
 		this.accessibilityViewProvider.updateReport(data);
 		try {
 			await vscode.commands.executeCommand(COLORBUDDY_CONTAINER_COMMAND);
-			this.accessibilityViewProvider.reveal(false);
+			this.accessibilityViewProvider.revealSection('contrast', false);
 		} catch (error) {
 			console.error(`${LOG_PREFIX} failed to reveal accessibility report view`, error);
 		}
