@@ -2,7 +2,7 @@
   "name": "colorbuddy",
   "displayName": "Color Buddy - Your VS Code Color Companion",
   "description": "Adds color indicators and displays some useful info on hover anywhere a color code, cssclass or style containing a colordefinition or --variable is found. Helps you to quickly find and navigate to the color definition.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "PAUlander",
   "repository": {
     "type": "git",
@@ -49,17 +49,39 @@
         {
           "id": "colorbuddy",
           "title": "ColorBuddy",
-          "icon": "media/colorbuddy-activity.svg"
+          "icon": "media/colorbuddy-palette-white6.svg"
         }
       ]
     },
     "views": {
       "colorbuddy": [
         {
-          "id": "colorbuddy.accessibilityReport",
-          "name": "Accessibility Report",
+          "id": "colorbuddy.accessibilitySummary",
+          "name": "Accessibility summary",
           "type": "webview",
-          "contextualTitle": "ColorBuddy Accessibility"
+          "contextualTitle": "ColorBuddy Accessibility Summary",
+          "icon": "media/colorbuddy-palette-white6.svg"
+        },
+        {
+          "id": "colorbuddy.accessibilityContrast",
+          "name": "WCAG test results",
+          "type": "webview",
+          "contextualTitle": "ColorBuddy Accessibility WCAG Checks",
+          "icon": "media/colorbuddy-palette-white6.svg"
+        },
+        {
+          "id": "colorbuddy.accessibilityContexts",
+          "name": "Variable contexts",
+          "type": "webview",
+          "contextualTitle": "ColorBuddy CSS Variable Contexts",
+          "icon": "media/colorbuddy-palette-white6.svg"
+        },
+        {
+          "id": "colorbuddy.accessibilityFormats",
+          "name": "Format conversions",
+          "type": "webview",
+          "contextualTitle": "ColorBuddy Color Format Conversions",
+          "icon": "media/colorbuddy-palette-white6.svg"
         }
       ]
     },
