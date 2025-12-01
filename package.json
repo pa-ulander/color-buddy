@@ -224,6 +224,7 @@
     "webpack-cli": "^6.0.1"
   },
   "dependencies": {
+    "@vscode/codicons": "^0.0.43",
     "@vscode/l10n": "^0.0.18",
     "dotenv": "^16.4.5"
   }

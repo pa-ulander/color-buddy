@@ -112,7 +112,8 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 	resolveWebviewView(webviewView: vscode.WebviewView, _context: vscode.WebviewViewResolveContext, _token: vscode.CancellationToken): void {
 		this.view = webviewView;
 		webviewView.webview.options = {
-			enableScripts: false,
+			enableScripts: true,
+			enableCommandUris: true,
 			localResourceRoots: [this.extensionUri]
 		};
 		this.render(webviewView, this.pendingData);
@@ -148,13 +149,17 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 			const uri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', fileName));
 			return `<link rel="stylesheet" href="${uri}">`;
 		}).join('\n');
+
+		const codiconsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.css'));
+		
 		return `<!DOCTYPE html>
 <html lang="en">
 <head>
 	<meta charset="UTF-8" />
-	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline';" />
+	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src ${webview.cspSource} 'unsafe-inline';" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 	<title>${this.escapeHtml(t(LocalizedStrings.TOOLTIP_ACCESSIBILITY))}</title>
+	<link href="${codiconsUri}" rel="stylesheet" />
 	${styleLinks}
 	<style>
 		:root { color-scheme: light dark; }
@@ -294,6 +299,14 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 			padding: 0.1rem 0.35rem;
 			border-radius: 4px;
 			font-size: 0.9em;
+		}
+		.copy-button {
+			cursor: pointer;
+			opacity: 0.7;
+			transition: opacity 0.2s;
+		}
+		.copy-button:hover {
+			opacity: 1;
 		}
 	</style>
 </head>
@@ -495,7 +508,29 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 			`);
 			
 			for (const conversion of data.conversions) {
-				parts.push(`<li><code>${this.escapeHtml(conversion.value)}</code></li>`);
+				// Get format label (RGB, RGBA, HSLA, etc.)
+				const formatLabel = this.getFormatLabel(conversion.format);
+				const copyTitle = t(LocalizedStrings.COMMAND_QUICK_ACTION_COPY);
+				
+				// Create command URI with payload - same as tooltips
+				const payload = {
+					value: conversion.value,
+					format: conversion.format,
+					source: 'statusBar' as const
+				};
+				const encodedPayload = encodeURIComponent(JSON.stringify(payload));
+				const commandUri = `command:colorbuddy.copyColorAs?${encodedPayload}`;
+				
+				parts.push(`
+					<li>
+						<strong>${this.escapeHtml(formatLabel)}:</strong> 
+						<a href="${commandUri}" 
+							title="${this.escapeHtml(copyTitle)}"
+							style="color: var(--vscode-textLink-foreground); text-decoration: none;">
+							<code>${this.escapeHtml(conversion.value)}</code> <span class="codicon codicon-clippy"></span>
+						</a>
+					</li>
+				`);
 			}
 			
 			parts.push(`
@@ -674,6 +709,19 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 				${chips.map(text => `<span class="cb-chip">${text}</span>`).join('')}
 			</div>
 		`;
+	}
+
+	private getFormatLabel(format: string): string {
+		switch (format) {
+			case 'hex': return 'Hex';
+			case 'hexAlpha': return 'Hex (with alpha)';
+			case 'rgb': return 'RGB';
+			case 'rgba': return 'RGBA';
+			case 'hsl': return 'HSL';
+			case 'hsla': return 'HSLA';
+			case 'tailwindHsl': return 'Tailwind HSL';
+			default: return format.toUpperCase();
+		}
 	}
 
 	private escapeHtml(value: string): string {
