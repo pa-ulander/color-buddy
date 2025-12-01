@@ -11,7 +11,8 @@ import type {
     ColorData,
     AccessibilityCheck,
     CopyColorCommandPayload,
-    TestAccessibilityCommandPayload
+    TestAccessibilityCommandPayload,
+    FindUsagesCommandPayload
 } from '../types';
 import { collectFormatConversions, appendFormatConversionList, FormatConversion } from '../utils/colorFormatConversions';
 import { appendQuickActions } from '../utils/quickActions';
@@ -169,6 +170,15 @@ export class Provider {
                 }
             : undefined;
 
+        const findUsagesPayload: FindUsagesCommandPayload | undefined = data.normalizedColor
+            ? {
+                    value: data.normalizedColor,
+                    format: data.format,
+                    source: 'hover',
+                    label: data.originalText
+                }
+            : undefined;
+
         const overrides: Record<string, { args?: unknown[] }> = {};
         if (payload) {
             overrides['colorbuddy.copyColorAs'] = { args: [payload] };
@@ -178,6 +188,9 @@ export class Provider {
         }
         if (accessibilityPayload) {
             overrides['colorbuddy.testColorAccessibility'] = { args: [accessibilityPayload] };
+        }
+        if (findUsagesPayload) {
+            overrides['colorbuddy.findColorUsages'] = { args: [findUsagesPayload] };
         }
         const quickActionOverrides = Object.keys(overrides).length > 0 ? overrides : undefined;
         appendQuickActions(markdown, { surface: 'hover', overrides: quickActionOverrides });
