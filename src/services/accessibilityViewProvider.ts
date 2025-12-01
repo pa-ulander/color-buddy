@@ -16,6 +16,8 @@ export interface AccessibilityViewData {
 	tailwindClass?: string;
 	cssClassName?: string;
 	variableContexts?: AccessibilityVariableContext[];
+	usageMatches?: AccessibilityUsageMatch[];
+	searchValue?: string;
 }
 
 export interface AccessibilityVariableContext {
@@ -25,6 +27,13 @@ export interface AccessibilityVariableContext {
 	location: string;
 	uri: vscode.Uri;
 	line: number;
+}
+
+export interface AccessibilityUsageMatch {
+	uri: vscode.Uri;
+	range: vscode.Range;
+	previewText: string;
+	relativePath: string;
 }
 
 export type AccessibilityPanelSection = 'summary' | 'contrast' | 'contexts' | 'formats';
@@ -638,17 +647,31 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 	}
 
 	private renderContextsSection(data: AccessibilityViewData, options?: SectionRenderOptions): string {
+		// If we have usage matches, display them (find usages results)
+		if (data.usageMatches && data.usageMatches.length > 0) {
+			return this.renderUsageMatches(data, options);
+		}
+		
+		// Otherwise, show variable contexts if available
 		const contexts = data.variableContexts ?? [];
 		if (contexts.length === 0) {
 			return options?.embed ? '' : this.renderEmptyState(t(LocalizedStrings.ACCESSIBILITY_VIEW_EMPTY_CONTEXTS));
 		}
-		const entries = contexts.map(context => `
+		const entries = contexts.map(context => {
+			// Create clickable link to file location
+			const fileLink = `${context.uri.toString()}#L${context.line + 1}`;
+			
+			return `
 			<div class="cb-context-entry">
 				<p class="cb-context-label">${this.escapeHtml(context.label)}</p>
 				<p><code>${this.escapeHtml(context.resolvedValue)}</code></p>
-				<p class="cb-context-source">${this.escapeHtml(context.location)}</p>
+				<p class="cb-context-source">
+					${this.escapeHtml(t(LocalizedStrings.TOOLTIP_DEFINED_IN))} 
+					<a href="${fileLink}" style="color: var(--vscode-textLink-foreground); text-decoration: none;">${this.escapeHtml(context.location)}</a>
+				</p>
 			</div>
-		`).join('');
+		`;
+		}).join('');
 
 		const card = `
 			<section class="cb-card">
@@ -656,6 +679,46 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 					<div>
 						<p class="cb-eyebrow">${this.escapeHtml(t(LocalizedStrings.TOOLTIP_VARIABLE))}</p>
 						<h3>${this.escapeHtml(t(LocalizedStrings.TOOLTIP_VARIABLE))}</h3>
+					</div>
+				</header>
+				${entries}
+			</section>
+		`;
+		return card;
+	}
+
+	private renderUsageMatches(data: AccessibilityViewData, options?: SectionRenderOptions): string {
+		const matches = data.usageMatches ?? [];
+		if (matches.length === 0) {
+			return options?.embed ? '' : this.renderEmptyState('No usages found');
+		}
+
+		const searchValue = data.searchValue ?? data.label;
+		const entries = matches.map(match => {
+			const fileLink = `${match.uri.toString()}#L${match.range.start.line + 1}`;
+			const lineNumber = match.range.start.line + 1;
+			
+			return `
+			<div class="cb-context-entry" style="cursor: pointer;">
+				<p class="cb-context-label">
+					<a href="${fileLink}" style="color: var(--vscode-textLink-foreground); text-decoration: none;">
+						${this.escapeHtml(match.relativePath)}:${lineNumber}
+					</a>
+				</p>
+				<p style="font-size: 0.9em; color: var(--vscode-descriptionForeground);"><code>${this.escapeHtml(match.previewText)}</code></p>
+			</div>
+		`;
+		}).join('');
+
+		const card = `
+			<section class="cb-card">
+				<header class="cb-section-header">
+					<div>
+						<p class="cb-eyebrow">Find Usages</p>
+						<h3>${this.escapeHtml(searchValue)}</h3>
+					</div>
+					<div class="cb-toolbar-meta">
+						<span>${matches.length} result${matches.length !== 1 ? 's' : ''}</span>
 					</div>
 				</header>
 				${entries}
