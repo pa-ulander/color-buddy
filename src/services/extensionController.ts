@@ -1654,6 +1654,9 @@ export class ExtensionController implements vscode.Disposable {
 			this.statusBarItem.text = text;
 			this.statusBarItem.tooltip = this.buildStatusBarTooltip(activeColor, primary, metrics, accessibilityReport, conversions);
 			this.statusBarItem.show();
+
+			// Update accessibility panel with the same data shown in hover tooltips
+			this.updateAccessibilityPanel(activeColor, colorData, conversions, usageCount, accessibilityReport);
 		} catch (error) {
 			console.error(`${LOG_PREFIX} failed to update status bar`, error);
 			this.statusBarItem.hide();
@@ -1687,6 +1690,50 @@ export class ExtensionController implements vscode.Disposable {
 			usageCount,
 			contrast: buildContrastTelemetry(report)
 		});
+	}
+
+	private updateAccessibilityPanel(
+		activeColor: ColorData,
+		_allColorData: ColorData[],
+		conversions: FormatConversion[],
+		usageCount: number,
+		accessibilityReport: AccessibilityReport
+	): void {
+		const insights = getColorInsights(activeColor.vscodeColor);
+		
+		// Build the label based on the color type
+		let label = activeColor.originalText;
+		if (activeColor.isCssVariable && activeColor.variableName) {
+			label = activeColor.variableName;
+		} else if (activeColor.isTailwindClass && activeColor.tailwindClass) {
+			label = activeColor.tailwindClass;
+		} else if (activeColor.isCssClass && activeColor.cssClassName) {
+			label = activeColor.cssClassName;
+		}
+
+		// Gather variable contexts if this is a CSS variable
+		const variableContexts = activeColor.variableName 
+			? this.getVariableContextSummaries(activeColor.variableName)
+			: undefined;
+
+		const viewData: AccessibilityViewData = {
+			label,
+			normalizedColor: activeColor.normalizedColor,
+			colorName: insights.name,
+			colorHex: insights.hex,
+			brightness: insights.brightness,
+			report: accessibilityReport,
+			conversions,
+			usageCount,
+			cssVariableName: activeColor.variableName,
+			tailwindClass: activeColor.tailwindClass,
+			cssClassName: activeColor.cssClassName,
+			variableContexts
+		};
+
+		this.accessibilityViewProvider.updateReport(viewData);
+		// Auto-reveal the summary panel when a color is selected
+		this.accessibilityViewProvider.reveal(true);
 	}
 
 	private getColorInsightKind(data: ColorData): ColorInsightColorKind {
