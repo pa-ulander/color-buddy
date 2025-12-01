@@ -1521,7 +1521,9 @@ export class ExtensionController implements vscode.Disposable {
 			label: entry.label,
 			value: entry.value,
 			resolvedValue: entry.resolvedValue,
-			location: entry.location
+			location: entry.location,
+			uri: entry.uri,
+			line: entry.line
 		}));
 	}
 

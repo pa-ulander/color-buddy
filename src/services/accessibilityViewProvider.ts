@@ -23,6 +23,8 @@ export interface AccessibilityVariableContext {
 	value: string;
 	resolvedValue: string;
 	location: string;
+	uri: vscode.Uri;
+	line: number;
 }
 
 export type AccessibilityPanelSection = 'summary' | 'contrast' | 'contexts' | 'formats';
@@ -403,13 +405,16 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 				// Inline swatch matching tooltip style
 				const swatchStyle = `width: 10px; height: 10px; border-radius: 2px; background: ${this.escapeHtml(cssColor)}; border: 1px solid white; display: inline-block; vertical-align: middle; margin-right: 0.5rem;`;
 				
+				// Create clickable link to file location
+				const fileLink = `${context.uri.toString()}#L${context.line + 1}`;
+				
 				parts.push(`
 					<p style="margin: 0.5rem 0;">
 						<span style="${swatchStyle}"></span>
 						<strong>${this.escapeHtml(context.label)}:</strong> <code>${this.escapeHtml(context.resolvedValue)}</code>
 					</p>
 					<p style="font-size: 0.85rem; color: var(--vscode-descriptionForeground); margin: 0 0 0.5rem 1.5rem;">
-						${this.escapeHtml(t(LocalizedStrings.TOOLTIP_DEFINED_IN))} ${this.escapeHtml(context.location)}
+						${this.escapeHtml(t(LocalizedStrings.TOOLTIP_DEFINED_IN))} <a href="${fileLink}" style="color: var(--vscode-textLink-foreground); text-decoration: none;">${this.escapeHtml(context.location)}</a>
 					</p>
 				`);
 			}
