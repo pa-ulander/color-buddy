@@ -80,7 +80,8 @@ export class ColorParser {
      */
     getFormatPriority(original: ColorFormat): ColorFormat[] {
         const priority = [original];
-        const fallbacks: ColorFormat[] = ['rgba', 'hsla', 'hexAlpha', 'rgb', 'hsl', 'hex', 'tailwind'];
+        // Expanded list to show more format variations
+        const fallbacks: ColorFormat[] = ['tailwind', 'rgba', 'hsla', 'hexAlpha', 'rgb', 'hsl', 'hex'];
         
         for (const format of fallbacks) {
             if (!priority.includes(format)) {

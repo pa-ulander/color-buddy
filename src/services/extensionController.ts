@@ -46,7 +46,8 @@ import {
 	AccessibilityViewProvider,
 	type AccessibilityReportPresenter,
 	type AccessibilityViewData,
-	type AccessibilityVariableContext
+	type AccessibilityVariableContext,
+	type AccessibilityPanelSection
 } from './accessibilityViewProvider';
 
 const CSS_LIKE_LANGUAGES = new Set([
@@ -532,7 +533,7 @@ export class ExtensionController implements vscode.Disposable {
 	}
 
 	private async presentAccessibilityReport(data: AccessibilityViewData): Promise<void> {
-		this.accessibilityViewProvider.updateReport(data);
+		this.accessibilityViewProvider.updateReport(data, 'contrast');
 		try {
 			await vscode.commands.executeCommand(COLORBUDDY_CONTAINER_COMMAND);
 			this.accessibilityViewProvider.revealSection('contrast', false);
@@ -618,39 +619,25 @@ export class ExtensionController implements vscode.Disposable {
 		}
 
 		const currentValue = editor.document.getText(range);
-		const alternativeConversions = conversions.filter(conversion => conversion.value !== currentValue);
-		if (alternativeConversions.length === 0) {
-			await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_NO_ALTERNATIVES));
-			return;
-		}
+		const insights = getColorInsights(color);
+		
+		// Create data for the formats panel
+		const data: AccessibilityViewData = {
+			label: currentValue,
+			normalizedColor: insights.hex,
+			colorName: insights.name,
+			colorHex: insights.hex,
+			brightness: insights.brightness,
+			report: { samples: [] } as any, // Not needed for formats
+			conversions,
+			currentFormatValue: currentValue,
+			editorRange: range,
+			editorUri: editor.document.uri.toString()
+		};
 
-		let chosen = alternativeConversions[0];
-		if (conversions.length > 1) {
-			const quickPickItems = conversions.map(conversion => ({
-				label: conversion.value,
-				description: getFormatLabel(conversion.format),
-				detail: conversion.value === currentValue ? t(LocalizedStrings.COMMAND_CONVERT_COLOR_CURRENT_LABEL) : undefined
-			}));
-			const selection = await vscode.window.showQuickPick(quickPickItems, {
-				title: t(LocalizedStrings.COMMAND_CONVERT_COLOR_TITLE),
-				placeHolder: t(LocalizedStrings.COMMAND_CONVERT_COLOR_PLACEHOLDER)
-			});
-			if (!selection) {
-				return;
-			}
-			chosen = conversions.find(conversion => conversion.value === selection.label) ?? alternativeConversions[0];
-		}
-
-		const editApplied = await editor.edit(editBuilder => {
-			editBuilder.replace(range, chosen.value);
-		});
-
-		if (!editApplied) {
-			await vscode.window.showErrorMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_ERROR));
-			return;
-		}
-
-		await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_SUCCESS, chosen.value));
+		// Update formats panel with conversion options
+		this.accessibilityViewProvider.updateReport(data, 'formats');
+		this.accessibilityViewProvider.revealSection('formats', true);
 	}
 
 	private async ensurePerformanceLoggingEnabled(): Promise<boolean> {
@@ -1454,7 +1441,7 @@ export class ExtensionController implements vscode.Disposable {
 			searchValue
 		};
 
-		this.accessibilityViewProvider.updateReport(data);
+		this.accessibilityViewProvider.updateReport(data, 'contexts');
 		this.accessibilityViewProvider.revealSection('contexts', true);
 	}
 
@@ -1711,7 +1698,7 @@ export class ExtensionController implements vscode.Disposable {
 			this.statusBarItem.show();
 
 			// Update accessibility panel with the same data shown in hover tooltips
-			this.updateAccessibilityPanel(activeColor, colorData, conversions, usageCount, accessibilityReport);
+			this.updateAccessibilityPanel(activeColor, colorData, conversions, usageCount, accessibilityReport, 'summary');
 		} catch (error) {
 			console.error(`${LOG_PREFIX} failed to update status bar`, error);
 			this.statusBarItem.hide();
@@ -1752,7 +1739,8 @@ export class ExtensionController implements vscode.Disposable {
 		_allColorData: ColorData[],
 		conversions: FormatConversion[],
 		usageCount: number,
-		accessibilityReport: AccessibilityReport
+		accessibilityReport: AccessibilityReport,
+		section?: AccessibilityPanelSection
 	): void {
 		const insights = getColorInsights(activeColor.vscodeColor);
 		
@@ -1786,9 +1774,13 @@ export class ExtensionController implements vscode.Disposable {
 			variableContexts
 		};
 
-		this.accessibilityViewProvider.updateReport(viewData);
+		this.accessibilityViewProvider.updateReport(viewData, section);
 		// Auto-reveal the summary panel when a color is selected
-		this.accessibilityViewProvider.reveal(true);
+		if (section) {
+			this.accessibilityViewProvider.revealSection(section, true);
+		} else {
+			this.accessibilityViewProvider.reveal(true);
+		}
 	}
 
 	private getColorInsightKind(data: ColorData): ColorInsightColorKind {

@@ -18,6 +18,9 @@ export interface AccessibilityViewData {
 	variableContexts?: AccessibilityVariableContext[];
 	usageMatches?: AccessibilityUsageMatch[];
 	searchValue?: string;
+	currentFormatValue?: string;
+	editorRange?: vscode.Range;
+	editorUri?: string;
 }
 
 export interface AccessibilityVariableContext {
@@ -40,7 +43,7 @@ export type AccessibilityPanelSection = 'summary' | 'contrast' | 'contexts' | 'f
 
 export interface AccessibilityReportPresenter extends vscode.WebviewViewProvider {
 	readonly viewId: string;
-	updateReport(data: AccessibilityViewData): void;
+	updateReport(data: AccessibilityViewData, section?: AccessibilityPanelSection): void;
 	reveal(preserveFocus?: boolean): void;
 	revealSection(section: AccessibilityPanelSection, preserveFocus?: boolean): void;
 	getSectionProviders(): AccessibilitySectionProvider[];
@@ -84,10 +87,19 @@ export class AccessibilityViewProvider implements AccessibilityReportPresenter {
 		return Object.values(this.providers);
 	}
 
-	updateReport(data: AccessibilityViewData): void {
+	updateReport(data: AccessibilityViewData, section?: AccessibilityPanelSection): void {
 		this.lastRenderedData = data;
-		for (const provider of Object.values(this.providers)) {
-			provider.updateReport(data);
+		if (section) {
+			// Update only the specified section
+			const provider = this.providers[section];
+			if (provider) {
+				provider.updateReport(data);
+			}
+		} else {
+			// Update all sections (legacy behavior)
+			for (const provider of Object.values(this.providers)) {
+				provider.updateReport(data);
+			}
 		}
 	}
 
@@ -327,7 +339,7 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 
 	private getSectionContent(data: AccessibilityViewData | null): string {
 		if (!data) {
-			return this.renderEmptyState();
+			return this.renderEmptyStateForSection();
 		}
 
 		switch (this.section) {
@@ -342,6 +354,27 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 			default:
 				return this.renderEmptyState();
 		}
+	}
+
+	private renderEmptyStateForSection(): string {
+		let message: string;
+		switch (this.section) {
+			case 'summary':
+				message = 'Click on a CSS rule or color in the editor to see an accessibility summary.';
+				break;
+			case 'contrast':
+				message = 'Trigger "Test accessibility" to see accessibility test results.';
+				break;
+			case 'contexts':
+				message = 'Trigger "Find usages" to see where a color is used in your codebase.';
+				break;
+			case 'formats':
+				message = 'Trigger "Convert" to convert between various color formats.';
+				break;
+			default:
+				message = t(LocalizedStrings.ACCESSIBILITY_VIEW_EMPTY_HINT);
+		}
+		return this.renderEmptyState(message);
 	}
 
 	private renderEmptyState(message?: string): string {
@@ -732,17 +765,36 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 			return options?.embed ? '' : this.renderEmptyState(t(LocalizedStrings.ACCESSIBILITY_VIEW_EMPTY_FORMATS));
 		}
 
-		const listItems = data.conversions.map(conversion => `<li><code>${this.escapeHtml(conversion.value)}</code></li>`).join('');
+		const currentValue = data.currentFormatValue;
+		const listItems = data.conversions.map(conversion => {
+			const isCurrent = conversion.value === currentValue;
+			const label = this.getFormatLabel(conversion.format);
+			
+			// Build payload for copy command
+			const payload = {
+				value: conversion.value,
+				format: conversion.format,
+				label: label
+			};
+			const encodedPayload = encodeURIComponent(JSON.stringify(payload));
+			const commandUri = `command:colorbuddy.copyColorAs?${encodedPayload}`;
+			const copyIcon = `<a href="${commandUri}" class="cb-copy-icon" title="Copy to clipboard"><i class="codicon codicon-copy"></i></a>`;
+			
+			return `<li class="cb-format-item ${isCurrent ? 'cb-current' : ''}">
+				<strong>${this.escapeHtml(label)}:</strong> 
+				<code>${this.escapeHtml(conversion.value)}</code>
+				${copyIcon}
+			</li>`;
+		}).join('');
 
 		const card = `
 			<section class="cb-card">
 				<header class="cb-section-header">
 					<div>
-						<p class="cb-eyebrow">${this.escapeHtml(t(LocalizedStrings.TOOLTIP_FORMATS_AVAILABLE))}</p>
 						<h3>${this.escapeHtml(t(LocalizedStrings.TOOLTIP_FORMATS_AVAILABLE))}</h3>
 					</div>
 				</header>
-				<ul class="cb-list">
+				<ul class="cb-list cb-format-list">
 					${listItems}
 				</ul>
 			</section>
