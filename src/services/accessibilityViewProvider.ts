@@ -691,8 +691,13 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 			return options?.embed ? '' : this.renderEmptyState(t(LocalizedStrings.ACCESSIBILITY_VIEW_EMPTY_CONTEXTS));
 		}
 		const entries = contexts.map(context => {
-			// Create clickable link to file location
-			const fileLink = `${context.uri.toString()}#L${context.line + 1}`;
+			// Use simple URI with line fragment
+			const uriString = typeof context.uri === 'string' ? context.uri : context.uri.toString();
+			const lineNumber = context.line + 1;
+			const uriWithFragment = `${uriString}#${lineNumber}`;
+			const args = [uriWithFragment];
+			const encodedArgs = encodeURIComponent(JSON.stringify(args));
+			const commandUri = `command:vscode.open?${encodedArgs}`;
 			
 			return `
 			<div class="cb-context-entry">
@@ -700,7 +705,7 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 				<p><code>${this.escapeHtml(context.resolvedValue)}</code></p>
 				<p class="cb-context-source">
 					${this.escapeHtml(t(LocalizedStrings.TOOLTIP_DEFINED_IN))} 
-					<a href="${fileLink}" style="color: var(--vscode-textLink-foreground); text-decoration: none;">${this.escapeHtml(context.location)}</a>
+					<a href="${commandUri}" style="color: var(--vscode-textLink-foreground); text-decoration: none;">${this.escapeHtml(context.location)}</a>
 				</p>
 			</div>
 		`;
@@ -728,13 +733,22 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 
 		const searchValue = data.searchValue ?? data.label;
 		const entries = matches.map(match => {
-			const fileLink = `${match.uri.toString()}#L${match.range.start.line + 1}`;
 			const lineNumber = match.range.start.line + 1;
+			
+			// Use simple URI with line/column fragment (standard VS Code format)
+			const uriString = typeof match.uri === 'string' ? match.uri : match.uri.toString();
+			const startChar = typeof match.range.start.character === 'number' ? match.range.start.character + 1 : 1;
+			
+			// Format: file:///path#L{line}:{char}
+			const uriWithFragment = `${uriString}#${lineNumber}:${startChar}`;
+			const args = [uriWithFragment];
+			const encodedArgs = encodeURIComponent(JSON.stringify(args));
+			const commandUri = `command:vscode.open?${encodedArgs}`;
 			
 			return `
 			<div class="cb-context-entry" style="cursor: pointer;">
 				<p class="cb-context-label">
-					<a href="${fileLink}" style="color: var(--vscode-textLink-foreground); text-decoration: none;">
+					<a href="${commandUri}" style="color: var(--vscode-textLink-foreground); text-decoration: none;">
 						${this.escapeHtml(match.relativePath)}:${lineNumber}
 					</a>
 				</p>
