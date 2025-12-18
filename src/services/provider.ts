@@ -173,7 +173,8 @@ export class Provider {
                     value: data.normalizedColor,
                     format: data.format,
                     source: 'hover',
-                    label: data.originalText
+                    label: data.originalText,
+                    metadata
                 }
             : undefined;
 
