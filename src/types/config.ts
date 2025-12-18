@@ -59,13 +59,9 @@ export const CONFIG_NAMESPACE = 'colorbuddy';
  * Configuration keys used by the extension.
  */
 export const ConfigKeys = {
-    LANGUAGES: 'languages',
-    TELEMETRY_ENABLED: 'enableTelemetry',
-    TELEMETRY_BATCH_SIZE: 'telemetryBatchSize'
+    LANGUAGES: 'languages'
 } as const;
 
 export interface ColorBuddyConfiguration {
     languages: string[];
-    enableTelemetry: boolean;
-    telemetryBatchSize?: number;
 }
