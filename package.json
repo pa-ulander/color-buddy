@@ -181,17 +181,6 @@
           "type": "boolean",
           "description": "Enable detailed performance logging for diagnostics. Logs timing information for indexing, caching, and hover operations to the Output panel.",
           "default": false
-        },
-        "colorbuddy.enableTelemetry": {
-          "type": "boolean",
-          "description": "Allow ColorBuddy to collect anonymous quick action usage telemetry. Disabled by default.",
-          "default": false
-        },
-        "colorbuddy.telemetryBatchSize": {
-          "type": "number",
-          "description": "Number of telemetry events to batch before sending to the endpoint.",
-          "default": 20,
-          "minimum": 1
         }
       }
     }
@@ -225,7 +214,6 @@
   },
   "dependencies": {
     "@vscode/codicons": "^0.0.43",
-    "@vscode/l10n": "^0.0.18",
-    "dotenv": "^16.4.5"
+    "@vscode/l10n": "^0.0.18"
   }
 }
