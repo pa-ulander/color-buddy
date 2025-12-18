@@ -21,6 +21,7 @@ export interface AccessibilityViewData {
 	currentFormatValue?: string;
 	editorRange?: vscode.Range;
 	editorUri?: string;
+	section?: 'summary' | 'contrast' | 'contexts' | 'formats';
 }
 
 export interface AccessibilityVariableContext {
@@ -762,7 +763,7 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 				<header class="cb-section-header">
 					<div>
 						<p class="cb-eyebrow">Find Usages</p>
-						<h3>${this.escapeHtml(searchValue)}</h3>
+						<h3>Results for: ${this.escapeHtml(searchValue)}</h3>
 					</div>
 					<div class="cb-toolbar-meta">
 						<span>${matches.length} result${matches.length !== 1 ? 's' : ''}</span>
