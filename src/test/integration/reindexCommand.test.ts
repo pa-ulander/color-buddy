@@ -944,6 +944,33 @@ suite('Command Integration', () => {
 		}
 	});
 
+	test('colorbuddy.testColorAccessibility opens different panels based on payload panel parameter', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const command = env.registeredCommands.get('colorbuddy.testColorAccessibility');
+			assert.ok(typeof command === 'function', 'Test color accessibility command missing');
+
+			// Test opening summary panel (default for "Display summary" action)
+			await (command as (...args: unknown[]) => unknown)({ value: 'rgb(15, 23, 42)', panel: 'summary' });
+			let viewData = getAccessibilityView(env).getLastRenderedData();
+			assert.ok(viewData, 'Summary panel should receive data');
+			assert.strictEqual(viewData?.section, 'summary', 'Should open summary panel when panel=summary');
+
+			// Test opening contrast panel (for "Test accessibility" action)
+			await (command as (...args: unknown[]) => unknown)({ value: 'rgb(15, 23, 42)', panel: 'contrast' });
+			viewData = getAccessibilityView(env).getLastRenderedData();
+			assert.ok(viewData, 'Contrast panel should receive data');
+			assert.strictEqual(viewData?.section, 'contrast', 'Should open contrast (WCAG TEST RESULTS) panel when panel=contrast');
+
+			// Test default behavior (no panel specified, should default to summary)
+			await (command as (...args: unknown[]) => unknown)({ value: 'rgb(15, 23, 42)' });
+			viewData = getAccessibilityView(env).getLastRenderedData();
+			assert.strictEqual(viewData?.section, 'summary', 'Should default to summary panel when no panel specified');
+		} finally {
+			await env.restore();
+		}
+	});
+
 	test('colorbuddy.findColorUsages reports when no color is available', async () => {
 		const env = await setupCommandTestEnvironment();
 		try {
@@ -1020,4 +1047,35 @@ suite('Command Integration', () => {
 			await env.restore();
 		}
 	});
+
+test('colorbuddy.findColorUsages uses metadata fields when creating search candidates', async () => {
+	const env = await setupCommandTestEnvironment();
+	try {
+		const command = env.registeredCommands.get('colorbuddy.findColorUsages');
+		assert.ok(typeof command === 'function', 'Find color usages command missing');
+
+		// Set up workspace to have NO files - this ensures we hit the "no results" case
+		// But the important part is that the command TRIES to search for the correct values
+		env.setFindFilesResults([]);
+
+		const initialInfoCount = env.infoMessages.length;
+
+		// Test with CSS variable metadata - should search for variable name too
+		await (command as (...args: unknown[]) => unknown)({
+			value: '#3b82f6',
+			label: 'var(--primary)',
+			metadata: { variableName: '--primary' }
+		});
+
+		// Should show "no results" message (since we have no files)
+		const afterMessages = env.infoMessages.slice(initialInfoCount);
+		assert.ok(afterMessages.some(msg => msg.includes('No usages found')), 'Should show no results message');
+		
+		// The key behavior: with metadata, it creates ColorData with variableName set
+		// This means getColorSearchCandidates will include --primary in the search
+		// (This is the fix - before it would only search for #3b82f6)
+	} finally {
+		await env.restore();
+	}
+});
 });
