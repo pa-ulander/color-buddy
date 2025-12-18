@@ -227,10 +227,11 @@ suite('Default language literal pipeline', () => {
 			assert.ok(/Contrast on white \([\d\.]+:1\)/.test(hoverContents.value), `hover should surface contrast ratio details for ${language}`);
 			assert.ok(hoverContents.value.includes(t(LocalizedStrings.COMMAND_QUICK_ACTIONS_TITLE)), `hover should include quick actions heading for ${language}`);
 			assert.ok(hoverContents.value.includes('command:colorbuddy.executeQuickAction'), `hover should route quick actions through execute command for ${language}`);
-			const hoverLinkMatch = hoverContents.value.match(/command:colorbuddy\.executeQuickAction\?([^"\)\]]+)/);
+			const hoverLinkMatch = hoverContents.value.match(/command:colorbuddy\.executeQuickAction\?([^\s"]+)/);
 			assertDefined(hoverLinkMatch, `expected quick action link payload for ${language}`);
 			const hoverPayload = JSON.parse(decodeURIComponent(hoverLinkMatch![1]));
-			assert.strictEqual(hoverPayload.target, 'colorbuddy.copyColorAs', `hover quick action should target copy command for ${language}`);
+			// First quick action is now "Display summary" (testColorAccessibility), changed in Session 53
+			assert.strictEqual(hoverPayload.target, 'colorbuddy.testColorAccessibility', `hover quick action should target accessibility command for ${language}`);
 			assert.strictEqual(hoverPayload.source, 'hover', `hover quick action should mark hover surface for ${language}`);
 			assert.ok(hoverContents.value.includes('colorbuddy.findColorUsages'), `hover quick actions should include find usages for ${language}`);
 			assert.ok(hoverContents.value.includes('colorbuddy.showColorPalette'), `hover quick actions should include palette for ${language}`);
@@ -273,10 +274,11 @@ suite('Default language literal pipeline', () => {
 				assert.ok(tooltip.value.includes('command:colorbuddy.copyColorAs?'), 'status bar tooltip should include copy command link');
 				assert.ok(tooltip.value.includes(t(LocalizedStrings.COMMAND_QUICK_ACTIONS_TITLE)), 'status bar tooltip should include quick actions header');
 				assert.ok(tooltip.value.includes('command:colorbuddy.executeQuickAction'), 'status bar quick actions should route through execute command');
-				const linkMatch = tooltip.value.match(/command:colorbuddy\.executeQuickAction\?([^"\)\]]+)/);
+				const linkMatch = tooltip.value.match(/command:colorbuddy\.executeQuickAction\?([^\s"]+)/);
 				assertDefined(linkMatch, 'status bar quick action payload should be present');
 				const payload = JSON.parse(decodeURIComponent(linkMatch![1]));
-				assert.strictEqual(payload.target, 'colorbuddy.copyColorAs', 'status bar quick action should include copy command link');
+				// First quick action is now "Display summary" (testColorAccessibility), changed in Session 53
+				assert.strictEqual(payload.target, 'colorbuddy.testColorAccessibility', 'status bar quick action should include accessibility command link');
 				assert.strictEqual(payload.source, 'statusBar', 'status bar quick action payload should mark the surface');
 				assert.ok(tooltip.value.includes('colorbuddy.findColorUsages'), 'status bar quick actions should include find usages command');
 				assert.ok(tooltip.value.includes('colorbuddy.showColorPalette'), 'status bar quick actions should include palette command');
