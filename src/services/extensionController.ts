@@ -45,8 +45,7 @@ import {
 	AccessibilityViewProvider,
 	type AccessibilityReportPresenter,
 	type AccessibilityViewData,
-	type AccessibilityVariableContext,
-	type AccessibilityPanelSection
+	type AccessibilityVariableContext
 } from './accessibilityViewProvider';
 
 const CSS_LIKE_LANGUAGES = new Set([
@@ -553,10 +552,10 @@ export class ExtensionController implements vscode.Disposable {
 	}
 
 	private async presentAccessibilityReport(data: AccessibilityViewData): Promise<void> {
-		this.accessibilityViewProvider.updateReport(data, 'contrast');
+		this.accessibilityViewProvider.updateReport(data, 'summary');
 		try {
 			await vscode.commands.executeCommand(COLORBUDDY_CONTAINER_COMMAND);
-			this.accessibilityViewProvider.revealSection('contrast', false);
+			this.accessibilityViewProvider.revealSection('summary', false);
 		} catch (error) {
 			console.error(`${LOG_PREFIX} failed to reveal accessibility report view`, error);
 		}
@@ -947,9 +946,59 @@ export class ExtensionController implements vscode.Disposable {
 			}
 		});
 
+		// Register definition provider for ctrl+click navigation to CSS variable/class definitions
+		const definitionProvider = vscode.languages.registerDefinitionProvider(selector, {
+			provideDefinition: async (document, position) => {
+				const colorData = await this.ensureColorData(document);
+				const activeColor = colorData.find(data => data.range.contains(position));
+				
+				if (!activeColor) {
+					return undefined;
+				}
+
+				const locations: vscode.Location[] = [];
+
+				// Find CSS variable definitions
+				if (activeColor.isCssVariable && activeColor.variableName) {
+					const declarations = this.registry.getVariable(activeColor.variableName);
+					if (declarations && declarations.length > 0) {
+						for (const decl of declarations) {
+							const position = new vscode.Position(decl.line, 0);
+							locations.push(new vscode.Location(decl.uri, position));
+						}
+					}
+				}
+
+				// Find Tailwind/CSS class definitions
+				if (activeColor.isCssClass && activeColor.cssClassName) {
+					const declarations = this.registry.getClass(activeColor.cssClassName);
+					if (declarations && declarations.length > 0) {
+						for (const decl of declarations) {
+							const position = new vscode.Position(decl.line, 0);
+							locations.push(new vscode.Location(decl.uri, position));
+						}
+					}
+				}
+
+				// Find Tailwind class definitions
+				if (activeColor.isTailwindClass && activeColor.tailwindClass) {
+					const declarations = this.registry.getVariable(activeColor.tailwindClass);
+					if (declarations && declarations.length > 0) {
+						for (const decl of declarations) {
+							const position = new vscode.Position(decl.line, 0);
+							locations.push(new vscode.Location(decl.uri, position));
+						}
+					}
+				}
+
+				return locations.length > 0 ? locations : undefined;
+			}
+		});
+
 		this.stateManager.addProviderSubscription(hoverProvider);
 		this.stateManager.addProviderSubscription(colorProvider);
-		this.context.subscriptions.push(hoverProvider, colorProvider);
+		this.stateManager.addProviderSubscription(definitionProvider);
+		this.context.subscriptions.push(hoverProvider, colorProvider, definitionProvider);
 	}
 
 	private registerViewProviders(): void {
@@ -1754,9 +1803,6 @@ export class ExtensionController implements vscode.Disposable {
 			this.statusBarItem.text = text;
 			this.statusBarItem.tooltip = this.buildStatusBarTooltip(activeColor, primary, metrics, accessibilityReport, conversions);
 			this.statusBarItem.show();
-
-			// Update accessibility panel with the same data shown in hover tooltips
-			this.updateAccessibilityPanel(activeColor, colorData, conversions, usageCount, accessibilityReport, 'summary');
 		} catch (error) {
 			console.error(`${LOG_PREFIX} failed to update status bar`, error);
 			this.statusBarItem.hide();
@@ -1781,55 +1827,6 @@ export class ExtensionController implements vscode.Disposable {
 			}
 		}
 		return result;
-	}
-
-	private updateAccessibilityPanel(
-		activeColor: ColorData,
-		_allColorData: ColorData[],
-		conversions: FormatConversion[],
-		usageCount: number,
-		accessibilityReport: AccessibilityReport,
-		section?: AccessibilityPanelSection
-	): void {
-		const insights = getColorInsights(activeColor.vscodeColor);
-		
-		// Build the label based on the color type
-		let label = activeColor.originalText;
-		if (activeColor.isCssVariable && activeColor.variableName) {
-			label = activeColor.variableName;
-		} else if (activeColor.isTailwindClass && activeColor.tailwindClass) {
-			label = activeColor.tailwindClass;
-		} else if (activeColor.isCssClass && activeColor.cssClassName) {
-			label = activeColor.cssClassName;
-		}
-
-		// Gather variable contexts if this is a CSS variable
-		const variableContexts = activeColor.variableName 
-			? this.getVariableContextSummaries(activeColor.variableName)
-			: undefined;
-
-		const viewData: AccessibilityViewData = {
-			label,
-			normalizedColor: activeColor.normalizedColor,
-			colorName: insights.name,
-			colorHex: insights.hex,
-			brightness: insights.brightness,
-			report: accessibilityReport,
-			conversions,
-			usageCount,
-			cssVariableName: activeColor.variableName,
-			tailwindClass: activeColor.tailwindClass,
-			cssClassName: activeColor.cssClassName,
-			variableContexts
-		};
-
-		this.accessibilityViewProvider.updateReport(viewData, section);
-		// Auto-reveal the summary panel when a color is selected
-		if (section) {
-			this.accessibilityViewProvider.revealSection(section, true);
-		} else {
-			this.accessibilityViewProvider.reveal(true);
-		}
 	}
 
 	/**

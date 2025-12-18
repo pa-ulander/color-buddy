@@ -27,6 +27,7 @@ interface AppendQuickActionsOptions {
 export const EXECUTE_QUICK_ACTION_COMMAND = 'colorbuddy.executeQuickAction';
 
 const QUICK_ACTIONS: QuickAction[] = [
+	{ command: 'colorbuddy.testColorAccessibility', label: t(LocalizedStrings.COMMAND_QUICK_ACTION_DISPLAY_SUMMARY) },
 	{ command: 'colorbuddy.copyColorAs', label: t(LocalizedStrings.COMMAND_QUICK_ACTION_COPY) },
 	{ command: 'colorbuddy.convertColorFormat', label: t(LocalizedStrings.COMMAND_QUICK_ACTION_CONVERT) },
 	{ command: 'colorbuddy.testColorAccessibility', label: t(LocalizedStrings.COMMAND_QUICK_ACTION_ACCESSIBILITY) },

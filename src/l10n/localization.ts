@@ -105,6 +105,7 @@ export const LocalizedStrings = {
 	COMMAND_CONVERT_COLOR_SUCCESS: 'Converted color to {0}.',
 	COMMAND_CONVERT_COLOR_ERROR: 'Failed to convert color. Check the logs for details.',
 	COMMAND_QUICK_ACTIONS_TITLE: 'Quick actions',
+	COMMAND_QUICK_ACTION_DISPLAY_SUMMARY: 'Display summary',
 	COMMAND_QUICK_ACTION_COPY: 'Copy',
 	COMMAND_QUICK_ACTION_CONVERT: 'Convert',
 	COMMAND_QUICK_ACTION_ACCESSIBILITY: 'Test accessibility',
