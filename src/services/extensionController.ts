@@ -135,6 +135,7 @@ export class ExtensionController implements vscode.Disposable {
 	private indexedCssDocuments: Map<string, number> = new Map();
 	private readonly statusBarItem: vscode.StatusBarItem;
 	private statusBarRequestId = 0;
+	private htmlRefreshInterval: NodeJS.Timeout | null = null;
 
 	constructor(private readonly context: vscode.ExtensionContext) {
 		// Initialize services with dependency injection
@@ -166,9 +167,16 @@ export class ExtensionController implements vscode.Disposable {
 		this.registerLanguageProviders();
 		this.registerViewProviders();
 		this.refreshVisibleEditors();
+		this.startHtmlRefreshInterval();
 		this.context.subscriptions.push(this.statusBarItem);
 		this.statusBarItem.hide();
 		void this.updateStatusBar(vscode.window.activeTextEditor);
+
+		// Re-apply decorations after other extensions finish loading
+		// VS Code may clear our decorations when other language extensions activate
+		setTimeout(() => {
+			this.refreshVisibleEditors();
+		}, 3000);
 
 		console.log(`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_ACTIVATED)}`);
 		perfLogger.end('extension.activate');
@@ -209,6 +217,26 @@ export class ExtensionController implements vscode.Disposable {
 		this.cssFileWatcher.onDidDelete(uri => this.handleCSSFileDelete(uri));
 
 		this.context.subscriptions.push(this.cssFileWatcher);
+	}
+
+	/**
+	 * Start periodic refresh for all visible editors to work around external decoration clearing.
+	 * Other extensions (especially language servers) may clear decorations when they activate,
+	 * so we periodically verify and re-apply them.
+	 */
+	private startHtmlRefreshInterval(): void {
+		// Refresh all visible editors every 2 seconds to maintain decorations
+		this.htmlRefreshInterval = setInterval(() => {
+			const editors = vscode.window.visibleTextEditors;
+			for (const editor of editors) {
+				// Force refresh by clearing signature cache to ensure re-application
+				const editorKey = this.getEditorKey(editor);
+				this.stateManager.clearDecorationSnapshots(editorKey);
+				this.refreshEditor(editor).catch(error => {
+					console.error(`${LOG_PREFIX} failed to refresh editor in interval`, error);
+				});
+			}
+		}, 2000);
 	}
 
 	/**
@@ -743,7 +771,6 @@ export class ExtensionController implements vscode.Disposable {
 				if (editor) {
 					const editorKey = this.getEditorKey(editor);
 					this.stateManager.markEditorVisible(editorKey);
-					perfLogger.log('Decoration exists for editor', this.stateManager.getDecoration(editorKey) !== undefined);
 					this.refreshEditor(editor).catch(error => {
 						console.error(`${LOG_PREFIX} failed to refresh active editor`, error);
 					});
@@ -758,6 +785,7 @@ export class ExtensionController implements vscode.Disposable {
 				for (const editor of editors) {
 					const editorKey = this.getEditorKey(editor);
 					if (!this.stateManager.isEditorVisible(editorKey)) {
+						console.log('[cb] Editor became visible, refreshing:', editor.document.uri.fsPath);
 						perfLogger.log('Editor became visible, refreshing', editor.document.uri.fsPath);
 						this.stateManager.markEditorVisible(editorKey);
 						this.refreshEditor(editor).catch(error => {
@@ -768,6 +796,7 @@ export class ExtensionController implements vscode.Disposable {
 				// Mark hidden editors
 				for (const visibleKey of this.stateManager.getVisibleEditors()) {
 					if (!currentVisible.has(visibleKey)) {
+						console.log('[cb] Editor became hidden:', visibleKey);
 						perfLogger.log('Editor became hidden', visibleKey);
 						this.stateManager.markEditorHidden(visibleKey);
 					}
@@ -858,9 +887,44 @@ export class ExtensionController implements vscode.Disposable {
 
 				let allowedFormats: Set<ColorFormat> | undefined;
 				if (this.isNativeColorProviderDocument(document)) {
+					// For CSS/SCSS/LESS: only provide Tailwind colors
+					// VS Code already has native color providers for literal colors
 					allowedFormats = new Set<ColorFormat>(['tailwind']);
 				} else if (this.isSassDocument(document)) {
 					allowedFormats = new Set<ColorFormat>(['tailwind', 'hsl', 'hsla']);
+				} else if (document.languageId === 'html') {
+					// For HTML: exclude colors in <style> tags and inline styles to avoid double swatches
+					// VS Code's native provider handles those, but gets cleared in <script> tags
+					const text = document.getText();
+					const filteredColorData = colorData.filter(data => {
+						const offset = document.offsetAt(data.range.start);
+						
+						// Check if inside <style>...</style> block
+						const styleTagRegex = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+						let match: RegExpExecArray | null;
+						while ((match = styleTagRegex.exec(text)) !== null) {
+							const contentStart = match.index + match[0].indexOf('>') + 1;
+							const contentEnd = match.index + match[0].lastIndexOf('</style>');
+							if (offset >= contentStart && offset < contentEnd) {
+								return false; // Inside style tag - exclude
+							}
+						}
+						
+						// Check if in inline style attribute
+						const line = document.lineAt(data.range.start.line).text;
+						if (line.includes('style=')) {
+							// More precise check: is this color within a style attribute?
+							const lineStartOffset = document.offsetAt(new vscode.Position(data.range.start.line, 0));
+							const relativeOffset = offset - lineStartOffset;
+							const styleAttrMatch = /style\s*=\s*["'][^"']*["']/gi.exec(line);
+							if (styleAttrMatch && relativeOffset >= styleAttrMatch.index && relativeOffset < styleAttrMatch.index + styleAttrMatch[0].length) {
+								return false; // Inside inline style - exclude
+							}
+						}
+						
+						return true; // Not in style context - include
+					});
+					return this.provider.provideDocumentColors(filteredColorData);
 				}
 
 				if (allowedFormats) {
@@ -1071,7 +1135,8 @@ export class ExtensionController implements vscode.Disposable {
 		}
 
 	private async ensureDocumentIndexed(document: vscode.TextDocument): Promise<void> {
-			if (!this.isCssLikeDocument(document)) {
+			// Index CSS-like documents and HTML files (for <style> tags)
+			if (!this.isCssLikeDocument(document) && document.languageId !== 'html') {
 			return;
 		}
 
@@ -1152,8 +1217,8 @@ export class ExtensionController implements vscode.Disposable {
 				chunks: Math.ceil(decorationRangesWithOptions.length / DECORATION_CHUNK_SIZE)
 			});
 			const chunkCount = Math.ceil(decorationRangesWithOptions.length / DECORATION_CHUNK_SIZE);
-			const decorationPool = this.stateManager.ensureDecorationPool(editorKey, chunkCount, () =>
-				vscode.window.createTextEditorDecorationType({
+			const decorationPool = this.stateManager.ensureDecorationPool(editorKey, chunkCount, () => {
+				const decorationType = vscode.window.createTextEditorDecorationType({
 					before: {
 						contentText: COLOR_SWATCH_CONTENT,
 						border: COLOR_SWATCH_BORDER,
@@ -1162,15 +1227,23 @@ export class ExtensionController implements vscode.Disposable {
 						margin: COLOR_SWATCH_MARGIN
 					},
 					backgroundColor: 'transparent'
-				})
-			);
+				});
+				// Register with extension context to prevent garbage collection
+				this.context.subscriptions.push(decorationType);
+				return decorationType;
+			});
 
 			let yieldedBetweenChunks = false;
+			const isActiveEditor = vscode.window.activeTextEditor === editor;
 			for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
 				const chunkStart = chunkIndex * DECORATION_CHUNK_SIZE;
 				const chunk = decorationRangesWithOptions.slice(chunkStart, chunkStart + DECORATION_CHUNK_SIZE);
 				const signature = this.computeDecorationChunkSignature(chunk);
-				if (this.stateManager.getDecorationChunkSignature(editorKey, chunkIndex) === signature) {
+				const existingSignature = this.stateManager.getDecorationChunkSignature(editorKey, chunkIndex);
+				
+				// Always re-apply decorations if this is the active editor (in case of tab switches)
+				// Otherwise, only skip if signature matches (for background editors)
+				if (existingSignature === signature && !isActiveEditor) {
 					continue;
 				}
 				editor.setDecorations(decorationPool[chunkIndex], chunk);
@@ -1766,6 +1839,10 @@ export class ExtensionController implements vscode.Disposable {
 		this.stateManager.dispose();
 		this.cache.clear();
 		this.cssFileWatcher?.dispose();
+		if (this.htmlRefreshInterval) {
+			clearInterval(this.htmlRefreshInterval);
+			this.htmlRefreshInterval = null;
+		}
 		this.disposables.forEach(d => d.dispose());
 		this.registeredLanguageKey = null;
 		this.statusBarItem.dispose();
