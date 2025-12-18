@@ -224,6 +224,12 @@ export class ExtensionController implements vscode.Disposable {
 	 * so we periodically verify and re-apply them.
 	 */
 	private startHtmlRefreshInterval(): void {
+		// Skip interval in test environments to avoid timing issues
+		// VS Code test environment sets this to 'development'
+		if (this.context.extensionMode === vscode.ExtensionMode.Test) {
+			return;
+		}
+		
 		// Refresh all visible editors every 2 seconds to maintain decorations
 		this.htmlRefreshInterval = setInterval(() => {
 			const editors = vscode.window.visibleTextEditors;
@@ -422,15 +428,27 @@ export class ExtensionController implements vscode.Disposable {
 				// Use the format from parsed result's priority list (first one is the original format)
 				const format = parsed.formatPriority?.[0] ?? payload.format ?? 'hex';
 				
+				// Extract metadata to populate colorData properties
+				const metadata = payload.metadata;
+				const variableName = metadata?.variableName;
+				const tailwindClass = metadata?.tailwindClass;
+				const cssClassName = metadata?.cssClassName;
+				
 				const colorData: ColorData = {
 					range: new vscode.Range(0, 0, 0, 0),
-					originalText: payload.value,
+					// CRITICAL: Use payload.label (the actual text clicked) as originalText,
+					// not payload.value (the normalized color). This ensures we search for
+					// what the user actually clicked on, guaranteeing at least 1 result.
+					originalText: payload.label ?? payload.value,
 					normalizedColor: parsed.cssString,
 					vscodeColor: parsed.vscodeColor,
 					format: format,
-					isCssVariable: false,
-					isTailwindClass: false,
-					isCssClass: false
+					isCssVariable: !!variableName,
+					variableName: variableName,
+					isTailwindClass: !!tailwindClass,
+					tailwindClass: tailwindClass,
+					isCssClass: !!cssClassName,
+					cssClassName: cssClassName
 				};
 				console.log(`${LOG_PREFIX} Created colorData:`, colorData);
 				return {
@@ -501,10 +519,12 @@ export class ExtensionController implements vscode.Disposable {
 				cssVariableName,
 				tailwindClass,
 				cssClassName,
-				variableContexts: variableContexts.length ? variableContexts : undefined
+variableContexts: variableContexts.length ? variableContexts : undefined,
+			section: payload?.panel ?? 'summary'
 			};
 
-			await this.presentAccessibilityReport(data);
+			const panel = payload?.panel ?? 'summary';
+		await this.presentAccessibilityReport(data, panel);
 		} catch (error) {
 			console.error(`${LOG_PREFIX} failed to test color accessibility`, error);
 			await vscode.window.showErrorMessage(t(LocalizedStrings.COMMAND_TEST_ACCESSIBILITY_ERROR));
@@ -551,11 +571,11 @@ export class ExtensionController implements vscode.Disposable {
 		};
 	}
 
-	private async presentAccessibilityReport(data: AccessibilityViewData): Promise<void> {
-		this.accessibilityViewProvider.updateReport(data, 'summary');
+	private async presentAccessibilityReport(data: AccessibilityViewData, panel: 'summary' | 'contrast' | 'contexts' | 'formats' = 'summary'): Promise<void> {
+		this.accessibilityViewProvider.updateReport(data, panel);
 		try {
 			await vscode.commands.executeCommand(COLORBUDDY_CONTAINER_COMMAND);
-			this.accessibilityViewProvider.revealSection('summary', false);
+			this.accessibilityViewProvider.revealSection(panel, false);
 		} catch (error) {
 			console.error(`${LOG_PREFIX} failed to reveal accessibility report view`, error);
 		}
