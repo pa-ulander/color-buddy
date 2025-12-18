@@ -30,14 +30,6 @@ if (FIND_COLOR_USAGE_LINE_INDEX === -1) {
 	throw new Error('Find color usages fixture missing expected hex color.');
 }
 
-const FIND_COLOR_USAGE_PREVIEW = FIND_COLOR_USAGE_LINES[FIND_COLOR_USAGE_LINE_INDEX];
-const FIND_COLOR_USAGE_START = FIND_COLOR_USAGE_PREVIEW.indexOf(FIND_COLOR_USAGE_HEX);
-
-if (FIND_COLOR_USAGE_START === -1) {
-	throw new Error('Find color usages fixture preview missing expected hex color.');
-}
-
-const FIND_COLOR_USAGE_END = FIND_COLOR_USAGE_START + FIND_COLOR_USAGE_HEX.length;
 const ACCESSIBILITY_VIEW_COMMAND = 'workbench.view.extension.colorbuddy';
 
 suite('Command Integration', () => {
@@ -63,6 +55,8 @@ suite('Command Integration', () => {
 		setTextSearchMatches(matches: vscode.TextSearchMatch[]): void;
 		getTextSearchInvocations(): Array<{ query: vscode.TextSearchQuery; options?: vscode.FindTextInFilesOptions }>;
 		setPerformanceLoggingEnabled(enabled: boolean): void;
+		setFindFilesResults(results: vscode.Uri[]): void;
+		getFindFilesInvocations(): Array<{ include: vscode.GlobPattern; exclude?: vscode.GlobPattern }>;
 		restore(): Promise<void>;
 	}
 
@@ -79,17 +73,6 @@ suite('Command Integration', () => {
 			setDecorations: () => undefined,
 			revealRange: () => undefined
 		} as unknown as vscode.TextEditor;
-	}
-
-	function createTextSearchMatch(uri: vscode.Uri, lineText: string, line: number, matchStart: number, matchEnd: number): vscode.TextSearchMatch {
-		return {
-			uri,
-			ranges: [new vscode.Range(new vscode.Position(line, matchStart), new vscode.Position(line, matchEnd))],
-			preview: {
-				text: lineText,
-				matches: [new vscode.Range(new vscode.Position(0, matchStart), new vscode.Position(0, matchEnd))]
-			}
-		} as unknown as vscode.TextSearchMatch;
 	}
 
 	function getAccessibilityView(env: CommandTestEnvironment): AccessibilityViewProvider {
@@ -118,6 +101,8 @@ suite('Command Integration', () => {
 		const textSearchInvocations: Array<{ query: vscode.TextSearchQuery; options?: vscode.FindTextInFilesOptions }> = [];
 		let nextTextSearchMatches: vscode.TextSearchMatch[] = [];
 		const textSearchMatchMap = new Map<string, vscode.TextSearchMatch[]>();
+		let nextFindFilesResults: vscode.Uri[] = [];
+		const findFilesInvocations: Array<{ include: vscode.GlobPattern; exclude?: vscode.GlobPattern }> = [];
 		const originalProcessMaxListeners = process.getMaxListeners();
 		process.setMaxListeners(0);
 
@@ -135,8 +120,13 @@ suite('Command Integration', () => {
 		}) as typeof vscode.commands.executeCommand;
 
 		const originalFindFiles = vscode.workspace.findFiles;
-		(vscode.workspace as unknown as { findFiles: typeof vscode.workspace.findFiles }).findFiles = (async () => {
+		(vscode.workspace as unknown as { findFiles: typeof vscode.workspace.findFiles }).findFiles = (async (include: vscode.GlobPattern, exclude?: vscode.GlobPattern) => {
 			findFilesCallCount += 1;
+			findFilesInvocations.push({ include, exclude });
+			// Return configured results for color usage searches
+			if (nextFindFilesResults.length > 0) {
+				return nextFindFilesResults;
+			}
 			return [];
 		}) as typeof vscode.workspace.findFiles;
 
@@ -335,12 +325,13 @@ suite('Command Integration', () => {
 			}
 			if (arg instanceof vscode.Uri) {
 				const key = arg.toString();
+				// Handle fixture file from findFiles results
+				if (key === FIND_COLOR_USAGE_FIXTURE_URI.toString()) {
+					const content = FIND_COLOR_USAGE_LINES.join('\n');
+					return createMockDocument(content, 'css', arg);
+				}
 				const matchesForUri = textSearchMatchMap.get(key);
 				if (matchesForUri && matchesForUri.length > 0) {
-					if (key === FIND_COLOR_USAGE_FIXTURE_URI.toString()) {
-						const content = FIND_COLOR_USAGE_LINES.join('\n');
-						return createMockDocument(content, 'css', arg);
-					}
 					let maxLine = 0;
 					for (const match of matchesForUri) {
 						const range = Array.isArray(match.ranges) ? match.ranges[0] : match.ranges;
@@ -426,6 +417,10 @@ suite('Command Integration', () => {
 				perfLoggingEnabled = enabled;
 				perfLogger.updateEnabled();
 			},
+			setFindFilesResults: (results: vscode.Uri[]) => {
+				nextFindFilesResults = results;
+			},
+			getFindFilesInvocations: () => [...findFilesInvocations],
 			restore: async () => {
 				controller.dispose();
 				perfLogger.reset();
@@ -455,6 +450,8 @@ suite('Command Integration', () => {
 				textSearchInvocations.length = 0;
 				nextTextSearchMatches = [];
 				textSearchMatchMap.clear();
+				nextFindFilesResults = [];
+				findFilesInvocations.length = 0;
 				if (originalVisibleTextEditorsDescriptor) {
 					Object.defineProperty(vscode.window, 'visibleTextEditors', originalVisibleTextEditorsDescriptor);
 				} else {
@@ -778,7 +775,7 @@ suite('Command Integration', () => {
 		}
 	});
 
-	test('colorbuddy.convertColorFormat replaces the color literal with the chosen format', async () => {
+	test('colorbuddy.convertColorFormat opens formats panel with conversion options', async () => {
 		const env = await setupCommandTestEnvironment();
 		try {
 			const command = env.registeredCommands.get('colorbuddy.convertColorFormat');
@@ -792,33 +789,20 @@ suite('Command Integration', () => {
 			env.setActiveEditor(editor);
 			env.setVisibleEditors([editor]);
 
-			const appliedEdits: Array<{ range: vscode.Range; text: string }> = [];
-			(editor as unknown as { edit: typeof editor.edit }).edit = async callback => {
-				callback({
-					replace: (range: vscode.Range, text: string) => {
-						appliedEdits.push({ range, text });
-					}
-				} as vscode.TextEditorEdit);
-				return true;
-			};
-
-			env.setQuickPickHandler(items => items.find(item => item.label.toLowerCase().startsWith('rgb')) ?? items[0]);
-
-			const initialInfoCount = env.infoMessages.length;
 			await (command as (...args: unknown[]) => unknown)();
 
-			assert.strictEqual(env.quickPickRequests.length, 1, 'Expected a quick pick for conversion targets');
-			assert.ok(appliedEdits.length === 1, 'Expected a single edit to be applied');
-			const [edit] = appliedEdits;
-			assert.ok(edit.text.toLowerCase().startsWith('rgb'), 'Converted text should be in RGB format');
-			const infoMessages = env.infoMessages.slice(initialInfoCount);
-			assert.ok(infoMessages.some(message => message.includes(edit.text)), 'Success message should mention the converted value');
+			// Command now updates formats panel instead of showing QuickPick
+			const viewProvider = getAccessibilityView(env);
+			const lastData = viewProvider.getLastRenderedData();
+			assert.ok(lastData, 'Expected formats panel to be updated');
+			assert.ok(lastData.conversions && lastData.conversions.length > 0, 'Expected conversion options to be available');
+			assert.strictEqual(lastData.label, FIND_COLOR_USAGE_HEX, 'Expected current color value in panel');
 		} finally {
 			await env.restore();
 		}
 	});
 
-	test('colorbuddy.convertColorFormat converts provided payload without moving the cursor', async () => {
+	test('colorbuddy.convertColorFormat handles payload and opens formats panel', async () => {
 		const env = await setupCommandTestEnvironment();
 		try {
 			const command = env.registeredCommands.get('colorbuddy.convertColorFormat');
@@ -830,7 +814,6 @@ suite('Command Integration', () => {
 			const editor = createEditor(document, selection);
 			env.setActiveEditor(editor);
 			env.setVisibleEditors([editor]);
-			env.setQuickPickHandler(items => items.find(item => item.label.toLowerCase().startsWith('rgb')) ?? items[0]);
 
 			const colorIndex = document.getText().indexOf('#112233');
 			assert.ok(colorIndex >= 0, 'expected to find color literal in document');
@@ -847,25 +830,15 @@ suite('Command Integration', () => {
 				format: 'hex'
 			};
 
-			const appliedEdits: Array<{ range: vscode.Range; text: string }> = [];
-			(editor as unknown as { edit: typeof editor.edit }).edit = async callback => {
-				callback({
-					replace: (range: vscode.Range, text: string) => {
-						appliedEdits.push({ range, text });
-					}
-				} as vscode.TextEditorEdit);
-				return true;
-			};
-
-			const initialInfoCount = env.infoMessages.length;
 			await (command as (...args: unknown[]) => unknown)(payload);
 
-			assert.strictEqual(env.quickPickRequests.length, 1, 'Expected a quick pick when payload triggers conversion');
-			assert.strictEqual(appliedEdits.length, 1, 'Payload conversion should apply a single edit');
-			const [edit] = appliedEdits;
-			assert.ok(edit.text.toLowerCase().startsWith('rgb'), 'Payload conversion should honor selected format');
-			const messages = env.infoMessages.slice(initialInfoCount);
-			assert.ok(messages.some(message => message.includes(edit.text)), 'Success message should mention converted value');
+			// Command now updates formats panel instead of showing QuickPick
+			const viewProvider = getAccessibilityView(env);
+			const lastData = viewProvider.getLastRenderedData();
+			assert.ok(lastData, 'Expected formats panel to be updated with payload');
+			assert.ok(lastData.conversions && lastData.conversions.length > 0, 'Expected conversion options');
+			assert.ok(lastData.normalizedColor, 'Expected normalized color in panel');
+			assert.ok(lastData.normalizedColor.startsWith('#'), 'Expected hex color format in panel');
 		} finally {
 			await env.restore();
 		}
@@ -987,7 +960,7 @@ suite('Command Integration', () => {
 		}
 	});
 
-	test('colorbuddy.findColorUsages searches using active color and opens results', async () => {
+	test('colorbuddy.findColorUsages searches using active color and updates panel', async () => {
 		const env = await setupCommandTestEnvironment();
 		try {
 			const command = env.registeredCommands.get('colorbuddy.findColorUsages');
@@ -1000,29 +973,21 @@ suite('Command Integration', () => {
 			const editor = createEditor(document, selection);
 			env.setActiveEditor(editor);
 			env.setVisibleEditors([editor]);
-			env.setQuickPickHandler(items => items[0]);
-			env.setTextSearchMatches([
-				createTextSearchMatch(
-					FIND_COLOR_USAGE_FIXTURE_URI,
-					FIND_COLOR_USAGE_PREVIEW,
-					FIND_COLOR_USAGE_LINE_INDEX,
-					FIND_COLOR_USAGE_START,
-					FIND_COLOR_USAGE_END
-				)
-			]);
+			// Configure findFiles to return the fixture file
+			env.setFindFilesResults([FIND_COLOR_USAGE_FIXTURE_URI]);
 
 			await (command as (...args: unknown[]) => unknown)();
 
-			const searches = env.getTextSearchInvocations();
-			assert.strictEqual(searches.length, 1, 'Expected a single text search invocation');
-			assert.ok((searches[0].query.pattern ?? '').includes(FIND_COLOR_USAGE_HEX), 'Search query should include the selected color');
-			assert.ok(env.quickPickRequests.length >= 1, 'Expected quick pick interaction for results');
-			assert.strictEqual(env.showTextDocuments.length, 1, 'Should open the document for the selected match');
-			assert.strictEqual(
-				env.showTextDocuments[0].document.uri.toString(),
-				FIND_COLOR_USAGE_FIXTURE_URI.toString(),
-				'Expected the fixture document to open'
-			);
+			// Verify that workspace.findFiles was invoked for color usage search
+			const findFilesInvocations = env.getFindFilesInvocations();
+			// At least one findFiles call for color usage search (there may be others from setup)
+			assert.ok(findFilesInvocations.length >= 1, 'Expected findFiles to be invoked for color usage search');
+
+			// The panel should have been updated - verify via the view provider
+			const viewProvider = getAccessibilityView(env);
+			const lastData = viewProvider.getLastRenderedData();
+			assert.ok(lastData, 'Expected panel data to be set after find usages');
+			assert.ok(Array.isArray(lastData.usageMatches) && lastData.usageMatches.length > 0, 'Expected usage matches in panel data');
 		} finally {
 			await env.restore();
 		}
@@ -1040,15 +1005,17 @@ suite('Command Integration', () => {
 			const editor = createEditor(document, selection);
 			env.setActiveEditor(editor);
 			env.setVisibleEditors([editor]);
-			env.setQuickPickHandler(items => items[0]);
-			env.setTextSearchMatches([]);
+			// Configure findFiles to return an empty file that doesn't contain the color
+			env.setFindFilesResults([]);
 
 			const initialInfoCount = env.infoMessages.length;
 			await (command as (...args: unknown[]) => unknown)();
 
 			const afterMessages = env.infoMessages.slice(initialInfoCount);
 			assert.ok(afterMessages.some(message => message.includes('No usages found')), 'Expected no results message');
-			assert.strictEqual(env.getTextSearchInvocations().length, 1, 'Should still perform a search for the color');
+			// Verify findFiles was called for the search (at least once for color usage search)
+			const findFilesInvocations = env.getFindFilesInvocations();
+			assert.ok(findFilesInvocations.length >= 1, 'Should perform findFiles search for the color');
 		} finally {
 			await env.restore();
 		}
