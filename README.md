@@ -4,7 +4,7 @@
 
 ## ColorBuddy - Your VS Code Color Companion
 
-Adds color indicators and mouseover information anywhere a common color code is found in text or code. Find color definitions and navigate fast just like you are used to. Helps with theming or to manage cumbersome refactoring and accessability concerns. Finds definitions from CSS variables, Tailwind classes, and CSS class names with color properties. Plays nice together with other extensions.
+Adds color indicators and mouseover information anywhere a common color code is found in text or code. Find color definitions and navigate fast to definitions just like you are used to from your code. Helps with theming or to manage cumbersome refactoring and accessability concerns. Finds definitions from CSS variables, Tailwind classes, and CSS class names with color properties. Plays nice together with other extensions.
 
 ## Features
 *   **Inline color indicator** beside each detected color value
@@ -23,7 +23,8 @@ Adds color indicators and mouseover information anywhere a common color code is 
 1.  Open any file in a language covered by `colorbuddy.languages` (defaults include CSS, HTML, JS/TS, Markdown, and more)
 2.  Look for the inline color indicator next to recognized color codes
 3.  Hover over the color swatch or code to open vscode's tooltip and display color details
-4.  When hovering a color definition, the tooltip will contain VS Codes colorpicker enchanced with color information.
+4.  Ctrl+click to quickly navigate to a color definition (if applicable)
+5.  When hovering a color definition, the tooltip will contain VS Codes colorpicker enchanced with color information.
 
 ### Accessibility Report Panel
 
@@ -85,6 +86,9 @@ Open VSCode and type `ctrl+p`, then type: `ext install PAUlander.colorbuddy`
 3.  Pick the downloaded/generated `.vsix` file and reload the editor when prompted.
 4.  Alternatively, install via CLI with `code --install-extension color-buddy-*.*.*.vsix`.
 
+
+## Disclaimer
+This extension are still in early development stages.  It adds color indicators and hover information, but might not cover all edge cases or color formats yet. Please report any issues or feature requests.
 
 ## License
 
