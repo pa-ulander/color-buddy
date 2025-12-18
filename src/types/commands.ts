@@ -42,6 +42,7 @@ export interface TestAccessibilityCommandPayload {
 	source?: CopyColorCommandSource;
 	label?: string;
 	metadata?: TestAccessibilityCommandMetadata;
+	panel?: 'summary' | 'contrast' | 'contexts' | 'formats';
 }
 
 export interface FindUsagesCommandPayload {
@@ -49,4 +50,5 @@ export interface FindUsagesCommandPayload {
 	format?: ColorFormat;
 	source?: CopyColorCommandSource;
 	label?: string;
+	metadata?: TestAccessibilityCommandMetadata;
 }
