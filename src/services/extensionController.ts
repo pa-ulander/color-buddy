@@ -38,7 +38,6 @@ import type { FormatConversion } from '../utils/colorFormatConversions';
 import { appendQuickActions, EXECUTE_QUICK_ACTION_COMMAND, QuickActionLinkPayload } from '../utils/quickActions';
 import { buildConvertColorCommandPayload } from '../utils/commandPayloads';
 import { buildAccessibilityMetadata } from '../utils/accessibilityMetadata';
-import { Telemetry, buildContrastTelemetry, ColorInsightColorKind } from './telemetry';
 import { getColorUsageCount } from '../utils/colorUsage';
 import { getColorInsights } from '../utils/colorInsights';
 import { appendWcagStatusSection } from '../utils/accessibilityFormatting';
@@ -86,10 +85,6 @@ interface ColorUsageMatch {
 	relativePath?: string;
 }
 
-interface ExtensionControllerOptions {
-	telemetry?: Telemetry;
-}
-
 interface StatusBarMetrics {
 	usageCount: number;
 	contrastWhite?: ContrastSummary;
@@ -134,7 +129,6 @@ export class ExtensionController implements vscode.Disposable {
 	private readonly cssParser: CSSParser;
 	private readonly provider: Provider;
 	private readonly accessibilityViewProvider: AccessibilityReportPresenter;
-	private readonly telemetry: Telemetry;
 	private readonly disposables: vscode.Disposable[] = [];
 	private cssFileWatcher: vscode.FileSystemWatcher | null = null;
 	private registeredLanguageKey: string | null = null;
@@ -142,7 +136,7 @@ export class ExtensionController implements vscode.Disposable {
 	private readonly statusBarItem: vscode.StatusBarItem;
 	private statusBarRequestId = 0;
 
-	constructor(private readonly context: vscode.ExtensionContext, options?: ExtensionControllerOptions) {
+	constructor(private readonly context: vscode.ExtensionContext) {
 		// Initialize services with dependency injection
 		this.registry = new Registry();
 		this.cache = new Cache();
@@ -151,12 +145,10 @@ export class ExtensionController implements vscode.Disposable {
 		this.colorFormatter = new ColorFormatter();
 		this.colorDetector = new ColorDetector(this.registry, this.colorParser);
 		this.cssParser = new CSSParser(this.registry, this.colorParser);
-		this.telemetry = options?.telemetry ?? new Telemetry();
-		this.provider = new Provider(this.registry, this.colorParser, this.colorFormatter, this.cssParser, this.telemetry);
+		this.provider = new Provider(this.registry, this.colorParser, this.colorFormatter, this.cssParser);
 		this.accessibilityViewProvider = new AccessibilityViewProvider(this.context.extensionUri);
 		this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 		this.statusBarItem.name = 'ColorBuddy Active Color';
-		this.disposables.push(this.telemetry);
 	}
 
 	/**
@@ -711,12 +703,6 @@ export class ExtensionController implements vscode.Disposable {
 		}
 
 		const args = Array.isArray(payload.args) ? payload.args : [];
-		const source = payload.source === 'statusBar' ? 'statusBar' : 'hover';
-
-		this.telemetry.trackQuickAction({
-			target: payload.target,
-			source
-		});
 
 		try {
 			await vscode.commands.executeCommand(payload.target, ...args);
@@ -1691,7 +1677,6 @@ export class ExtensionController implements vscode.Disposable {
 				contrastWhite: contrastMetrics.contrastWhite,
 				contrastBlack: contrastMetrics.contrastBlack
 			};
-			this.recordStatusBarTelemetry(activeColor, usageCount, accessibilityReport);
 			const text = this.getStatusBarText(activeColor, primary, metrics);
 			this.statusBarItem.text = text;
 			this.statusBarItem.tooltip = this.buildStatusBarTooltip(activeColor, primary, metrics, accessibilityReport, conversions);
@@ -1723,15 +1708,6 @@ export class ExtensionController implements vscode.Disposable {
 			}
 		}
 		return result;
-	}
-
-	private recordStatusBarTelemetry(data: ColorData, usageCount: number, report: AccessibilityReport): void {
-		this.telemetry.trackColorInsight({
-			surface: 'statusBar',
-			colorKind: this.getColorInsightKind(data),
-			usageCount,
-			contrast: buildContrastTelemetry(report)
-		});
 	}
 
 	private updateAccessibilityPanel(
@@ -1781,19 +1757,6 @@ export class ExtensionController implements vscode.Disposable {
 		} else {
 			this.accessibilityViewProvider.reveal(true);
 		}
-	}
-
-	private getColorInsightKind(data: ColorData): ColorInsightColorKind {
-		if (data.isTailwindClass && data.tailwindClass) {
-			return 'tailwindClass';
-		}
-		if (data.isCssVariable && data.variableName) {
-			return 'cssVariable';
-		}
-		if (data.isCssClass && data.cssClassName) {
-			return 'cssClass';
-		}
-		return 'literal';
 	}
 
 	/**

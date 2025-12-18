@@ -3,7 +3,6 @@ import { ColorParser } from './colorParser';
 import { ColorFormatter } from './colorFormatter';
 import { CSSParser } from './cssParser';
 import { Registry } from './registry';
-import { Telemetry, buildContrastTelemetry, ColorInsightColorKind } from './telemetry';
 import { t, LocalizedStrings } from '../l10n/localization';
 import type {
     ColorFormat,
@@ -31,8 +30,7 @@ export class Provider {
         private readonly registry: Registry,
         private readonly colorParser: ColorParser,
         private readonly colorFormatter: ColorFormatter,
-        private readonly cssParser: CSSParser,
-        private readonly telemetry?: Telemetry
+        private readonly cssParser: CSSParser
     ) {}
 
     /**
@@ -218,32 +216,6 @@ export class Provider {
         appendWcagStatusSection(markdown, data.normalizedColor, report);
     }
 
-    private recordHoverTelemetry(data: ColorData, usageCount: number, report: AccessibilityReport): void {
-        if (!this.telemetry) {
-            return;
-        }
-
-        this.telemetry.trackColorInsight({
-            surface: 'hover',
-            colorKind: this.getColorInsightKind(data),
-            usageCount,
-            contrast: buildContrastTelemetry(report)
-        });
-    }
-
-    private getColorInsightKind(data: ColorData): ColorInsightColorKind {
-        if (data.isTailwindClass && data.tailwindClass) {
-            return 'tailwindClass';
-        }
-        if (data.isCssVariable && data.variableName) {
-            return 'cssVariable';
-        }
-        if (data.isCssClass && data.cssClassName) {
-            return 'cssClass';
-        }
-        return 'literal';
-    }
-
     /**
      * Create hover tooltip for CSS class colors
      */
@@ -275,7 +247,6 @@ export class Provider {
 
         const usageCount = getColorUsageCount(colorData, data);
         const report = this.getAccessibilityReport(data.vscodeColor);
-        this.recordHoverTelemetry(data, usageCount, report);
         this.appendMetricsSection(markdown, data, usageCount, report);
         const conversions = this.appendFormatConversions(markdown, data.vscodeColor, data.format);
         this.appendTooltipFooter(markdown, data, conversions, { usageCount });
@@ -373,7 +344,6 @@ export class Provider {
         }
 
         const report = this.getAccessibilityReport(data.vscodeColor);
-        this.recordHoverTelemetry(data, usageCount, report);
         this.appendMetricsSection(markdown, data, usageCount, report);
         const conversions = this.appendFormatConversions(markdown, data.vscodeColor, data.format);
         this.appendTooltipFooter(markdown, data, conversions, { preferredCopyValue, usageCount });
@@ -422,7 +392,6 @@ export class Provider {
 
         const usageCount = getColorUsageCount(colorData, data);
         const report = this.getAccessibilityReport(data.vscodeColor);
-        this.recordHoverTelemetry(data, usageCount, report);
         this.appendMetricsSection(markdown, data, usageCount, report);
         const conversions = this.appendFormatConversions(markdown, data.vscodeColor, data.format);
         this.appendTooltipFooter(markdown, data, conversions, { usageCount });
