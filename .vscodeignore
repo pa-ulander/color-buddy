@@ -2,7 +2,8 @@
 .vscode-test/**
 out/**
 node_modules/**
-!node_modules/@vscode/codicons/**
+!node_modules/@vscode/codicons/dist/**
+!node_modules/@vscode/l10n/dist/**
 src/**
 .gitignore
 .yarnrc
@@ -13,3 +14,22 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 **/.vscode-test.*
+
+# Exclude development/debugging files (CRITICAL for performance)
+.github/**
+logs/**
+benchmarks/**
+docs/**
+graphics/**
+bin/**
+scripts/**
+*.vsix
+
+# Exclude everything from node_modules except production dist folders
+node_modules/**/.github/**
+node_modules/**/test/**
+node_modules/**/tests/**
+node_modules/**/docs/**
+node_modules/**/*.md
+node_modules/**/.npmignore
+node_modules/**/.gitignore
