@@ -641,7 +641,7 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 		if (!data.report.samples.length) {
 			return options?.embed ? '' : '';
 		}
-		const details = data.report.samples.map((sample, index) => {
+		const details = data.report.samples.map((sample) => {
 			const ratio = sample.contrastRatio.toFixed(2);
 			const checks = sample.checks.map(check => {
 				const pass = check.outcome === 'pass';
@@ -652,9 +652,9 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 					</div>
 				`;
 			}).join('');
-			const shouldOpen = options?.embed ? true : index === 0;
+			// Open all contrast sections by default (both white and black backgrounds)
 			return `
-				<details class="cb-accordion" ${shouldOpen ? 'open' : ''}>
+				<details class="cb-accordion" open>
 					<summary>
 						<span>${this.escapeHtml(sample.label)}</span>
 						<span class="cb-ratio">${ratio}:1</span>
