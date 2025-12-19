@@ -177,6 +177,27 @@
             "graphql"
           ]
         },
+        "colorbuddy.searchExcludePatterns": {
+          "type": "array",
+          "description": "Glob patterns to exclude when searching for color usages. Common build/dependency folders are excluded by default.",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/node_modules/**",
+            "**/dist/**",
+            "**/out/**",
+            "**/build/**",
+            "**/.git/**",
+            "**/coverage/**",
+            "**/.vscode-test/**",
+            "**/vendor/**",
+            "**/storage/**",
+            "**/tmp/**",
+            "**/temp/**",
+            "**/cache/**"
+          ]
+        },
         "colorbuddy.enablePerformanceLogging": {
           "type": "boolean",
           "description": "Enable detailed performance logging for diagnostics. Logs timing information for indexing, caching, and hover operations to the Output panel.",
