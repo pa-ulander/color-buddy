@@ -728,7 +728,10 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 
 	private renderUsageMatches(data: AccessibilityViewData, options?: SectionRenderOptions): string {
 		const matches = data.usageMatches ?? [];
-		if (matches.length === 0) {
+		const isSearching = data.colorName && data.colorName.includes('Searching');
+		const formatVariations = data.conversions || [];
+		
+		if (matches.length === 0 && !isSearching) {
 			return options?.embed ? '' : this.renderEmptyState('No usages found');
 		}
 
@@ -758,6 +761,46 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 		`;
 		}).join('');
 
+		// Show search progress if still searching
+		const progressSection = isSearching ? `
+			<div style="padding: 12px; background: var(--vscode-editor-inactiveSelectionBackground); border-radius: 4px; margin-bottom: 12px;">
+				<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+					<div class="codicon codicon-loading codicon-modifier-spin" style="font-size: 16px;"></div>
+					<p style="margin: 0; font-weight: 500;">
+						Searching workspace...
+					</p>
+				</div>
+				<div style="margin-bottom: 8px;">
+					<div style="height: 4px; background: var(--vscode-progressBar-background); border-radius: 2px; overflow: hidden;">
+						<div class="cb-progress-bar" style="height: 100%; background: var(--vscode-progressBar-background); width: 100%; animation: cb-progress 1.5s ease-in-out infinite;"></div>
+					</div>
+				</div>
+				<p style="margin: 0; font-size: 0.9em; color: var(--vscode-descriptionForeground);">
+					Looking for ${formatVariations.length} format variation${formatVariations.length !== 1 ? 's' : ''}
+					${matches.length > 0 ? ` • Found ${matches.length} match${matches.length !== 1 ? 'es' : ''} so far` : ''}
+				</p>
+				${formatVariations.length > 0 && formatVariations.length <= 5 ? `
+					<details style="margin-top: 8px;">
+						<summary style="cursor: pointer; font-size: 0.9em; color: var(--vscode-descriptionForeground);">Show formats</summary>
+						<ul style="margin: 4px 0 0 0; padding-left: 20px; font-size: 0.85em; color: var(--vscode-descriptionForeground);">
+							${formatVariations.slice(0, 10).map(f => `<li><code>${this.escapeHtml(f.value)}</code></li>`).join('')}
+						</ul>
+					</details>
+				` : ''}
+			</div>
+			<style>
+				@keyframes cb-progress {
+					0% { transform: translateX(-100%); }
+					50% { transform: translateX(100%); }
+					100% { transform: translateX(-100%); }
+				}
+			</style>
+		` : '';
+
+		const resultsText = isSearching 
+			? `${matches.length} found so far...` 
+			: `${matches.length} result${matches.length !== 1 ? 's' : ''}`;
+
 		const card = `
 			<section class="cb-card">
 				<header class="cb-section-header">
@@ -766,9 +809,10 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 						<h3>Results for: ${this.escapeHtml(searchValue)}</h3>
 					</div>
 					<div class="cb-toolbar-meta">
-						<span>${matches.length} result${matches.length !== 1 ? 's' : ''}</span>
+						<span>${resultsText}</span>
 					</div>
 				</header>
+				${progressSection}
 				${entries}
 			</section>
 		`;
