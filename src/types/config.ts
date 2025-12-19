@@ -51,6 +51,25 @@ export const DEFAULT_LANGUAGES: string[] = [
 ];
 
 /**
+ * Default glob patterns to exclude when searching for color usages.
+ * These are common build output and dependency folders that should be skipped.
+ */
+export const DEFAULT_SEARCH_EXCLUDE_PATTERNS: string[] = [
+    '**/node_modules/**',
+    '**/dist/**',
+    '**/out/**',
+    '**/build/**',
+    '**/.git/**',
+    '**/coverage/**',
+    '**/.vscode-test/**',
+    '**/vendor/**',
+    '**/storage/**',
+    '**/tmp/**',
+    '**/temp/**',
+    '**/cache/**'
+];
+
+/**
  * Configuration namespace for ColorBuddy extension.
  */
 export const CONFIG_NAMESPACE = 'colorbuddy';
