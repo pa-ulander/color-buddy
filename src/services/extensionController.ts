@@ -10,7 +10,7 @@ import type {
 	TestAccessibilityCommandPayload,
 	FindUsagesCommandPayload
 } from '../types';
-import { DEFAULT_LANGUAGES } from '../types';
+import { DEFAULT_LANGUAGES, DEFAULT_SEARCH_EXCLUDE_PATTERNS } from '../types';
 import {
 	MAX_CSS_FILES,
 	CSS_FILE_PATTERN,
@@ -74,7 +74,7 @@ const CSS_LIKE_FILE_EXTENSIONS = new Set([
 ]);
 
 const SASS_FILE_EXTENSIONS = new Set(['.sass']);
-const MAX_COLOR_USAGE_RESULTS = 200;
+const MAX_COLOR_USAGE_RESULTS = 500;  // High limit - let users find all usages
 const COLORBUDDY_CONTAINER_COMMAND = 'workbench.view.extension.colorbuddy';
 
 interface ColorUsageMatch {
@@ -222,26 +222,17 @@ export class ExtensionController implements vscode.Disposable {
 	 * Start periodic refresh for all visible editors to work around external decoration clearing.
 	 * Other extensions (especially language servers) may clear decorations when they activate,
 	 * so we periodically verify and re-apply them.
+	 * 
+	 * DISABLED: This was causing severe performance issues (Session 54+).
+	 * The 2-second polling refresh was too aggressive. Instead, we rely on:
+	 * 1. onDidChangeTextEditorVisibleRanges for scroll/view changes
+	 * 2. onDidChangeActiveTextEditor for tab switches
+	 * 3. One-time delayed refresh after activation for extension load race conditions
 	 */
 	private startHtmlRefreshInterval(): void {
-		// Skip interval in test environments to avoid timing issues
-		// VS Code test environment sets this to 'development'
-		if (this.context.extensionMode === vscode.ExtensionMode.Test) {
-			return;
-		}
-		
-		// Refresh all visible editors every 2 seconds to maintain decorations
-		this.htmlRefreshInterval = setInterval(() => {
-			const editors = vscode.window.visibleTextEditors;
-			for (const editor of editors) {
-				// Force refresh by clearing signature cache to ensure re-application
-				const editorKey = this.getEditorKey(editor);
-				this.stateManager.clearDecorationSnapshots(editorKey);
-				this.refreshEditor(editor).catch(error => {
-					console.error(`${LOG_PREFIX} failed to refresh editor in interval`, error);
-				});
-			}
-		}, 2000);
+		// Completely disabled - was causing performance problems
+		// If decorations disappear in HTML files, investigate event-driven solutions instead
+		return;
 	}
 
 	/**
@@ -389,32 +380,53 @@ export class ExtensionController implements vscode.Disposable {
 	}
 
 	private async handleFindColorUsagesCommand(payload?: FindUsagesCommandPayload): Promise<void> {
+		console.log(`${LOG_PREFIX} ===== handleFindColorUsagesCommand START =====`);
+		console.log(`${LOG_PREFIX} handleFindColorUsagesCommand called with payload:`, JSON.stringify(payload, null, 2));
 		try {
 			// Get color context from payload or active editor
 			const context = await this.resolveFindUsagesColorContext(payload);
+			console.log(`${LOG_PREFIX} resolveFindUsagesColorContext returned:`, context ? 'valid context' : 'null');
 			if (!context) {
 				await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_FIND_USAGES_NO_COLOR));
 				return;
 			}
 
-			// Get all search candidates (all format variations)
+			// Get all format variations of the color (hex, rgb, hsl, etc.)
 			const searchCandidates = this.getColorSearchCandidates(context.colorData);
+			console.log(`${LOG_PREFIX} searching for color in ${searchCandidates.length} format variations:`, searchCandidates);
 			
 			if (searchCandidates.length === 0) {
 				await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_FIND_USAGES_NO_COLOR));
 				return;
 			}
 
-			// Search for all candidates and merge results
-			const allMatches = await this.searchColorUsagesMultiple(searchCandidates);			if (allMatches.length === 0) {
+			// Show "searching" state in panel immediately
+			await this.updateFindUsagesPanelSearching(context.label, searchCandidates);
+
+			// Search with progress notification and live updates to panel
+			const allMatches = await vscode.window.withProgress({
+				location: vscode.ProgressLocation.Notification,
+				title: `Finding usages of ${context.label}...`,
+				cancellable: false
+			}, async (progress) => {
+				progress.report({ message: 'Searching workspace...', increment: 10 });
+				const matches = await this.searchMultipleFormats(searchCandidates, context.label);
+				progress.report({ increment: 90 });
+				return matches;
+			});
+			
+			console.log(`${LOG_PREFIX} found ${allMatches.length} total matches`);
+			
+			// Final update to panel (clears "searching" state)
+			await this.updateFindUsagesPanel(context.label, allMatches);
+			
+			if (allMatches.length === 0) {
 				await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_FIND_USAGES_NO_RESULTS, context.label));
 				return;
 			}
-
-			// Display results in panel and optionally show QuickPick
-			await this.presentColorUsageResults(context.label, allMatches);
 			
 		} catch (error) {
+			console.error(`${LOG_PREFIX} handleFindColorUsagesCommand error:`, error);
 			await vscode.window.showErrorMessage(t(LocalizedStrings.COMMAND_FIND_USAGES_NO_RESULTS, payload?.label ?? 'color'));
 		}
 	}
@@ -476,20 +488,126 @@ export class ExtensionController implements vscode.Disposable {
 		};
 	}
 
-	private async searchColorUsagesMultiple(searchCandidates: string[]): Promise<ColorUsageMatch[]> {
-		const allMatches = new Map<string, ColorUsageMatch>(); // Use map to dedupe by location
+	private async searchWithRegex(regexPattern: string, colorLabel: string, searchCandidates: string[]): Promise<ColorUsageMatch[]> {
+		const startTime = Date.now();
+		const matches: ColorUsageMatch[] = [];
+		const BATCH_UPDATE_SIZE = 5; // Update panel every 5 matches for smooth UX
 		
-		for (const candidate of searchCandidates) {
-			const matches = await this.searchColorUsages(candidate);
-			for (const match of matches) {
-				const key = `${match.uri.toString()}:${match.range.start.line}:${match.range.start.character}`;
-				if (!allMatches.has(key)) {
-					allMatches.set(key, match);
+		// Get user-configured exclude patterns
+		const config = vscode.workspace.getConfiguration('colorbuddy');
+		const excludePatterns: string[] = config.get('searchExcludePatterns', DEFAULT_SEARCH_EXCLUDE_PATTERNS);
+		const excludeGlob = excludePatterns.join(',');
+		
+		// Build include pattern from all supported file extensions
+		const fileExtensions = [
+			'ts', 'tsx', 'js', 'jsx',           // JavaScript/TypeScript
+			'css', 'scss', 'sass', 'less',      // Stylesheets
+			'html', 'xml', 'svg',               // Markup
+			'vue', 'svelte', 'astro',           // Frameworks
+			'php', 'blade.php',                 // PHP/Laravel
+			'py', 'rb', 'go', 'rs',            // Other languages
+			'java', 'kt', 'swift', 'cs',       // More languages
+			'cpp', 'c', 'm', 'dart', 'lua',    // Even more languages
+			'sh', 'ps1', 'sql', 'graphql',     // Scripts/queries
+			'json', 'jsonc', 'yaml', 'toml',   // Config files
+			'md', 'mdx'                         // Documentation
+		];
+		const searchPattern = `**/*.{${fileExtensions.join(',')}}`;
+		
+		console.log(`${LOG_PREFIX} searching with REGEX pattern (${regexPattern.length} chars) in all supported file types...`);
+		console.log(`${LOG_PREFIX} search config: include="${searchPattern}", exclude="${excludeGlob}"`);
+		console.log(`${LOG_PREFIX} workspace folders:`, vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath));
+		
+		// Use native search with REGEX - matches all color formats in ONE pass
+		let nativeSearchCompleted = false;
+		let callbackCount = 0;
+		try {
+			await vscode.workspace.findTextInFiles(
+				{ pattern: regexPattern, isRegExp: true, isCaseSensitive: true },
+				{
+					include: searchPattern,
+					exclude: excludeGlob,
+					maxResults: MAX_COLOR_USAGE_RESULTS,
+					useIgnoreFiles: true,
+					useGlobalIgnoreFiles: true
+				},
+				(result: vscode.TextSearchResult) => {
+					nativeSearchCompleted = true;
+					callbackCount++;
+					if (callbackCount === 1 || callbackCount % 10 === 0) {
+						console.log(`${LOG_PREFIX} callback #${callbackCount}, file: ${result.uri.fsPath}`);
+					}
+					if ('ranges' in result && 'preview' in result && result.preview && typeof result.preview === 'object' && 'text' in result.preview) {
+						const ranges = result.ranges as vscode.Range | readonly vscode.Range[];
+						const range = Array.isArray(ranges) ? ranges[0] : ranges;
+						const preview = result.preview as { text: string };
+						matches.push({
+							uri: result.uri,
+							range: range,
+							previewText: preview.text.trim(),
+							relativePath: vscode.workspace.asRelativePath(result.uri, false)
+						});
+						
+						// Update panel progressively every N matches (don't await to avoid slowing search)
+						if (matches.length % BATCH_UPDATE_SIZE === 0) {
+							this.updateFindUsagesPanel(colorLabel, matches, searchCandidates).catch(err => {
+								console.error(`${LOG_PREFIX} error updating panel:`, err);
+							});
+						}
+					}
 				}
+			);
+			
+			if (matches.length > 0 || nativeSearchCompleted) {
+				const elapsed = Date.now() - startTime;
+				console.log(`${LOG_PREFIX} found ${matches.length} matches in ${elapsed}ms using native REGEX search (${callbackCount} callbacks)`);
+				return matches;
+			}
+			
+			console.log(`${LOG_PREFIX} native regex search returned no results, trying fallback`);
+		} catch (nativeError) {
+			console.log(`${LOG_PREFIX} native regex search error, using fallback:`, nativeError);
+		}
+		
+		// Fallback: Direct file search with regex (for test environments)
+		const files = await vscode.workspace.findFiles(searchPattern, `{${excludeGlob}}`);
+		console.log(`${LOG_PREFIX} scanning ${files.length} files (fallback regex mode)`);
+		
+		const regex = new RegExp(regexPattern, 'g');
+		for (const fileUri of files) {
+			try {
+				const document = await vscode.workspace.openTextDocument(fileUri);
+				const text = document.getText();
+				
+				regex.lastIndex = 0;
+				let match;
+				while ((match = regex.exec(text)) !== null) {
+					const position = document.positionAt(match.index);
+					const line = document.lineAt(position.line);
+					
+					matches.push({
+						uri: fileUri,
+						range: new vscode.Range(position, position.translate(0, match[0].length)),
+						previewText: line.text.trim(),
+						relativePath: vscode.workspace.asRelativePath(fileUri, false)
+					});
+					
+					if (matches.length >= MAX_COLOR_USAGE_RESULTS) {
+						break;
+					}
+				}
+			} catch (err) {
+				// Skip unreadable files
+			}
+			
+			if (matches.length >= MAX_COLOR_USAGE_RESULTS) {
+				break;
 			}
 		}
-
-		return Array.from(allMatches.values());
+		
+		const elapsed = Date.now() - startTime;
+		console.log(`${LOG_PREFIX} found ${matches.length} matches in ${elapsed}ms using fallback search`);
+		return matches;
 	}
 
 	private async handleTestAccessibilityCommand(payload?: TestAccessibilityCommandPayload): Promise<void> {
@@ -739,6 +857,7 @@ variableContexts: variableContexts.length ? variableContexts : undefined,
 	}
 
 	private async handleExecuteQuickActionCommand(payload?: QuickActionLinkPayload): Promise<void> {
+		console.log(`${LOG_PREFIX} handleExecuteQuickActionCommand called with payload:`, JSON.stringify(payload, null, 2));
 		if (!payload || typeof payload.target !== 'string') {
 			console.warn(`${LOG_PREFIX} quick action invoked without a valid target`, payload);
 			return;
@@ -750,12 +869,32 @@ variableContexts: variableContexts.length ? variableContexts : undefined,
 		}
 
 		const args = Array.isArray(payload.args) ? payload.args : [];
+		console.log(`${LOG_PREFIX} executing command: ${payload.target} with ${args.length} args`, args);
 
 		try {
-			await vscode.commands.executeCommand(payload.target, ...args);
+			// Check if command exists
+			console.log(`${LOG_PREFIX} getting all commands...`);
+			const allCommands = await vscode.commands.getCommands(true);
+			console.log(`${LOG_PREFIX} got ${allCommands.length} commands`);
+			const commandExists = allCommands.includes(payload.target);
+			console.log(`${LOG_PREFIX} command ${payload.target} exists: ${commandExists}`);
+			
+			if (!commandExists) {
+				console.error(`${LOG_PREFIX} command ${payload.target} is not registered!`);
+				await vscode.window.showErrorMessage(`Command ${payload.target} is not registered`);
+				return;
+			}
+
+			console.log(`${LOG_PREFIX} about to execute command with args:`, JSON.stringify(args));
+			const result = await vscode.commands.executeCommand(payload.target, ...args);
+			console.log(`${LOG_PREFIX} command ${payload.target} completed, result:`, result);
 		} catch (error) {
-			console.error(`${LOG_PREFIX} failed to execute quick action target ${payload.target}`, error);
+			console.error(`${LOG_PREFIX} EXCEPTION in executeCommand:`, error);
+			console.error(`${LOG_PREFIX} Error stack:`, error instanceof Error ? error.stack : 'no stack');
+			// Show error to user
+			await vscode.window.showErrorMessage(`Failed to execute ${payload.target}: ${String(error)}`);
 		}
+		console.log(`${LOG_PREFIX} handleExecuteQuickActionCommand END`);
 	}
 
 	/**
@@ -1476,7 +1615,6 @@ variableContexts: variableContexts.length ? variableContexts : undefined,
 
 		for (const conversion of collectFormatConversions(this.colorParser, this.colorFormatter, data.vscodeColor, data.format)) {
 			values.add(conversion.value);
-			// Add spacing variation
 			values.add(this.removeSpacesFromColorFunction(conversion.value));
 		}
 
@@ -1493,61 +1631,35 @@ variableContexts: variableContexts.length ? variableContexts : undefined,
 		return colorStr;
 	}
 
-	private async searchColorUsages(searchValue: string): Promise<ColorUsageMatch[]> {
-		const matches: ColorUsageMatch[] = [];
-		
-		// Direct file search - more reliable than findTextInFiles
-		const files = await vscode.workspace.findFiles(
-			'**/*.{ts,tsx,js,jsx,css,scss,sass,less,html,vue,svelte}',
-			'**/node_modules/**',
-			500
-		);
-
-		for (const fileUri of files) {
-			try {
-				const document = await vscode.workspace.openTextDocument(fileUri);
-				const text = document.getText();
-				
-				// Simple indexOf search for literal text
-				let index = 0;
-				while ((index = text.indexOf(searchValue, index)) !== -1) {
-					const position = document.positionAt(index);
-					const line = document.lineAt(position.line);
-					
-					matches.push({
-						uri: fileUri,
-						range: new vscode.Range(position, position.translate(0, searchValue.length)),
-						previewText: line.text.trim(),
-						relativePath: vscode.workspace.asRelativePath(fileUri, false)
-					});
-					
-					index += searchValue.length;
-					
-					if (matches.length >= MAX_COLOR_USAGE_RESULTS) {
-						break;
-					}
-				}
-			} catch (err) {
-				// Skip files that can't be read
-			}
-			
-			if (matches.length >= MAX_COLOR_USAGE_RESULTS) {
-				break;
-			}
+	private async searchMultipleFormats(searchCandidates: string[], colorLabel: string): Promise<ColorUsageMatch[]> {
+		if (searchCandidates.length === 0) {
+			return [];
 		}
-
-		return matches;
-	}
-
-	private async presentColorUsageResults(searchValue: string, matches: ColorUsageMatch[]): Promise<void> {
-		// Update the Find Usages panel with results
-		await this.updateFindUsagesPanel(searchValue, matches);
 		
-		// Don't show the QuickPick - just reveal the panel
-		// User can click on items in the panel to navigate
+		// Build ONE regex pattern matching ALL format variations
+		// This is the key to speed - single regex search instead of 10+ sequential searches
+		const regexPattern = this.buildColorSearchRegex(searchCandidates);
+		return await this.searchWithRegex(regexPattern, colorLabel, searchCandidates);
+	}
+	
+	private buildColorSearchRegex(searchCandidates: string[]): string {
+		// Escape special regex characters for literal matching
+		const escapedCandidates = searchCandidates.map(candidate => {
+			return candidate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		});
+		
+		// Build alternation pattern: (pattern1|pattern2|pattern3|...)
+		return `(?:${escapedCandidates.join('|')})`;
 	}
 
-	private async updateFindUsagesPanel(searchValue: string, matches: ColorUsageMatch[]): Promise<void> {
+	private async updateFindUsagesPanelSearching(colorLabel: string, searchCandidates: string[]): Promise<void> {
+		console.log(`${LOG_PREFIX} preparing to search for ${searchCandidates.length} color format variations of "${colorLabel}"`);
+		
+		// Show initial "searching" state with format variations
+		await this.updateFindUsagesPanel(colorLabel, [], searchCandidates);
+	}
+
+	private async updateFindUsagesPanel(searchValue: string, matches: ColorUsageMatch[], searchCandidates?: string[]): Promise<void> {
 		// Convert matches to the format expected by the view
 		const usageMatches = matches.map(match => ({
 			uri: match.uri,
@@ -1560,17 +1672,28 @@ variableContexts: variableContexts.length ? variableContexts : undefined,
 		const data: AccessibilityViewData = {
 			label: searchValue,
 			normalizedColor: '', // Not needed for find usages
-			colorName: '',
+			colorName: searchCandidates ? `Searching ${searchCandidates.length} formats...` : '',
 			colorHex: '',
 			brightness: 0,
 			report: { samples: [] } as any, // Not needed for find usages
-			conversions: [],
+			conversions: searchCandidates ? searchCandidates.map(c => ({ format: 'custom' as any, value: c, label: c })) : [],
 			usageMatches,
 			searchValue
 		};
 
+		console.log(`${LOG_PREFIX} Updating find usages panel with ${matches.length} matches${searchCandidates ? ' (searching...)' : ''}`);
+		
+		// Update the content FIRST so it's ready when panel opens
 		this.accessibilityViewProvider.updateReport(data, 'contexts');
-		this.accessibilityViewProvider.revealSection('contexts', true);
+		
+		// Now reveal the container and panel with content already loaded
+		try {
+			await vscode.commands.executeCommand(COLORBUDDY_CONTAINER_COMMAND);
+			await this.accessibilityViewProvider.revealSection('contexts', true);
+			console.log(`${LOG_PREFIX} Find usages panel revealed with ${matches.length} matches`);
+		} catch (error) {
+			console.error(`${LOG_PREFIX} Failed to reveal find usages panel:`, error);
+		}
 	}
 
 	private getStatusBarText(_data: ColorData, _primaryValue: string, _metrics: StatusBarMetrics): string {
