@@ -761,6 +761,26 @@ export class ExtensionController implements vscode.Disposable {
 				return true;
 			}
 
+			// Option 2: Check if this is a CSS variable/class reference and convert at definition
+			if (payload.source === 'panel' && payload.format && payload.originalText) {
+				const isReference = payload.originalText.includes('var(--') || 
+				                   payload.originalText.startsWith('--') ||
+				                   this.looksLikeTailwindClass(payload.originalText);
+				
+				if (isReference) {
+					// Get ColorData to identify the reference type
+					const colorData = await this.ensureColorData(editor.document);
+					const matchingData = colorData.find(cd => 
+						cd.range.start.line === range.start.line &&
+						cd.range.start.character === range.start.character
+					);
+					
+					if (matchingData && (matchingData.isCssVariable || matchingData.isTailwindClass || matchingData.isCssClass)) {
+						return await this.handleConvertAtDefinition(matchingData, payload.format);
+					}
+				}
+			}
+
 			// If source is 'panel', do the conversion directly (user clicked a format in the panel)
 			// Otherwise, show the formats panel (user clicked Convert quick action)
 			if (payload.source === 'panel' && payload.format) {
@@ -792,6 +812,14 @@ export class ExtensionController implements vscode.Disposable {
 			await vscode.window.showErrorMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_ERROR));
 			return true;
 		}
+	}
+
+	/**
+	 * Helper to detect if text looks like a Tailwind class
+	 */
+	private looksLikeTailwindClass(text: string): boolean {
+		// Simple heuristic: bg-, text-, border- prefixes without parentheses
+		return /^(bg|text|border)-[\w-]+$/.test(text) && !text.includes('(');
 	}
 
 	private async performColorConversion(
@@ -826,6 +854,205 @@ export class ExtensionController implements vscode.Disposable {
 		// Update formats panel with conversion options
 		this.accessibilityViewProvider.updateReport(data, 'formats');
 		this.accessibilityViewProvider.revealSection('formats', true);
+	}
+
+	/**
+	 * Handle convert-at-definition for CSS variables, Tailwind classes, and CSS classes.
+	 * This is Option 2: navigate to the definition and convert the actual color value.
+	 */
+	private async handleConvertAtDefinition(
+		colorData: ColorData,
+		targetFormat: ColorFormat
+	): Promise<boolean> {
+		try {
+			// 1. Look up definitions in Registry
+			const definitions = this.getDefinitionsForColorData(colorData);
+			
+			if (definitions.length === 0) {
+				await vscode.window.showErrorMessage('Could not find definition for this color reference');
+				return true;
+			}
+			
+			// 2. Handle multiple definitions (show QuickPick)
+			let selectedDef = definitions[0];
+			if (definitions.length > 1) {
+				const selected = await this.showDefinitionQuickPick(definitions);
+				if (!selected) {
+					return true; // User cancelled
+				}
+				selectedDef = selected;
+			}
+			
+			// 3. Open definition file
+			const doc = await vscode.workspace.openTextDocument(selectedDef.uri);
+			const editor = await vscode.window.showTextDocument(doc);
+			
+			// 4. Parse definition line to extract color value
+			const lineText = doc.lineAt(selectedDef.line).text;
+			const colorValue = this.extractColorFromDefinition(lineText, colorData);
+			
+			if (!colorValue) {
+				await vscode.window.showErrorMessage('Could not extract color value from definition');
+				return true;
+			}
+			
+			// 5. Handle nested variables (resolve var() references)
+			const resolvedValue = await this.resolveNestedVariable(colorValue);
+			
+			// 6. Parse and convert color
+			const parsed = this.colorParser.parseColor(resolvedValue);
+			if (!parsed) {
+				await vscode.window.showErrorMessage('Invalid color value in definition');
+				return true;
+			}
+			
+			const converted = this.colorFormatter.formatByFormat(parsed.vscodeColor, targetFormat);
+			if (!converted) {
+				await vscode.window.showErrorMessage('Failed to convert color format');
+				return true;
+			}
+			
+			// 7. Calculate exact range in definition line
+			const colorRange = this.findColorRangeInLine(lineText, resolvedValue, selectedDef.line);
+			
+			// 8. Apply edit
+			const success = await editor.edit(editBuilder => {
+				editBuilder.replace(colorRange, converted);
+			});
+			
+			if (success) {
+				// 9. Show success notification with file location
+				const fileName = selectedDef.uri.path.split('/').pop() || 'file';
+				const varName = colorData.variableName || colorData.tailwindClass || colorData.cssClassName || 'color';
+				await vscode.window.showInformationMessage(
+					`Converted ${varName} to ${targetFormat} in ${fileName}:${selectedDef.line + 1}`
+				);
+			}
+			
+			return true;
+		} catch (error) {
+			console.error(`${LOG_PREFIX} failed to convert at definition`, error);
+			await vscode.window.showErrorMessage('Failed to convert color at definition');
+			return true;
+		}
+	}
+
+	/**
+	 * Get definitions from ColorData by looking up in Registry
+	 */
+	private getDefinitionsForColorData(data: ColorData): Array<{uri: vscode.Uri, line: number, value: string}> {
+		if (data.variableName) {
+			const decls = this.registry.getVariable(data.variableName);
+			if (decls) {
+				return decls.map(d => ({uri: d.uri, line: d.line, value: d.value}));
+			}
+		}
+		if (data.tailwindClass) {
+			const decls = this.registry.getVariable(data.tailwindClass); // Tailwind classes stored as variables
+			if (decls) {
+				return decls.map(d => ({uri: d.uri, line: d.line, value: d.value}));
+			}
+		}
+		if (data.cssClassName) {
+			const decls = this.registry.getClass(data.cssClassName);
+			if (decls) {
+				return decls.map(d => ({uri: d.uri, line: d.line, value: d.value}));
+			}
+		}
+		return [];
+	}
+
+	/**
+	 * Show QuickPick for selecting which definition to convert
+	 */
+	private async showDefinitionQuickPick(definitions: Array<{uri: vscode.Uri, line: number, value: string}>): Promise<{uri: vscode.Uri, line: number, value: string} | undefined> {
+		const items = definitions.map(def => ({
+			label: def.uri.path.split('/').pop() || 'file',
+			description: `Line ${def.line + 1}`,
+			detail: def.value,
+			definition: def
+		}));
+		
+		const selected = await vscode.window.showQuickPick(items, {
+			placeHolder: 'Multiple definitions found. Select one:'
+		});
+		
+		return selected?.definition;
+	}
+
+	/**
+	 * Extract color value from definition line
+	 */
+	private extractColorFromDefinition(lineText: string, colorData: ColorData): string {
+		// Parse CSS: --primary: #3b82f6; → #3b82f6
+		// Parse Tailwind config: 'primary': '#3b82f6' → #3b82f6
+		// Parse CSS class: .primary { color: #3b82f6; } → #3b82f6
+		
+		if (colorData.variableName) {
+			// Match: --name: VALUE;
+			const match = lineText.match(/--[\w-]+\s*:\s*([^;]+)/);
+			return match?.[1].trim() || '';
+		}
+		
+		if (colorData.cssClassName) {
+			// Match: color: VALUE; or background-color: VALUE;
+			const match = lineText.match(/(?:color|background(?:-color)?)\s*:\s*([^;]+)/);
+			return match?.[1].trim() || '';
+		}
+		
+		if (colorData.tailwindClass) {
+			// Match: 'name': 'VALUE' or "name": "VALUE"
+			const match = lineText.match(/['"][\w-]+['"]\s*:\s*['"]([^'"]+)['"]/);
+			return match?.[1].trim() || '';
+		}
+		
+		return '';
+	}
+
+	/**
+	 * Resolve nested var() references
+	 */
+	private async resolveNestedVariable(value: string): Promise<string> {
+		// If value is var(--name), recursively resolve
+		const varMatch = value.match(/var\(\s*(--[\w-]+)\s*\)/);
+		if (!varMatch) {
+			return value;
+		}
+		
+		const nestedVar = varMatch[1];
+		const decls = this.registry.getVariable(nestedVar);
+		if (!decls || decls.length === 0) {
+			return value;
+		}
+		
+		// Use first declaration (highest specificity)
+		const nestedValue = decls[0].value;
+		
+		// Check for circular reference using visited set
+		return this.cssParser.resolveNestedVariables(nestedValue, {
+			visited: new Set([nestedVar])
+		});
+	}
+
+	/**
+	 * Find exact range of color value in line
+	 */
+	private findColorRangeInLine(lineText: string, colorValue: string, lineNumber: number): vscode.Range {
+		const startChar = lineText.indexOf(colorValue);
+		if (startChar === -1) {
+			// Fallback: replace entire value after colon
+			const colonIdx = lineText.indexOf(':');
+			const semicolonIdx = lineText.indexOf(';', colonIdx);
+			return new vscode.Range(
+				lineNumber, colonIdx + 1,
+				lineNumber, semicolonIdx > 0 ? semicolonIdx : lineText.length
+			);
+		}
+		
+		return new vscode.Range(
+			lineNumber, startChar,
+			lineNumber, startChar + colorValue.length
+		);
 	}
 
 	private async ensurePerformanceLoggingEnabled(): Promise<boolean> {
