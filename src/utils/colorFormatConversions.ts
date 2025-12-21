@@ -13,6 +13,7 @@ type ConversionSurface = Extract<CopyColorCommandPayload['source'], 'hover' | 's
 
 /**
  * Collect formatted color representations using the parser's format priority.
+ * Results are always returned in a consistent order regardless of primaryFormat.
  */
 export function collectFormatConversions(
     colorParser: ColorParser,
@@ -41,6 +42,16 @@ export function collectFormatConversions(
     if (results.length === 0) {
         results.push({ format: 'rgba', value: colorFormatter.toRgba(color, true) });
     }
+
+    // Sort in consistent order: hex, rgb, rgba, hsl, hsla, tailwind, hexAlpha
+    const formatOrder: ColorFormat[] = ['hex', 'rgb', 'rgba', 'hsl', 'hsla', 'tailwind', 'hexAlpha'];
+    results.sort((a, b) => {
+        const indexA = formatOrder.indexOf(a.format);
+        const indexB = formatOrder.indexOf(b.format);
+        const orderA = indexA === -1 ? 999 : indexA;
+        const orderB = indexB === -1 ? 999 : indexB;
+        return orderA - orderB;
+    });
 
     return results;
 }
