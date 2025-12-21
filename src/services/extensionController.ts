@@ -637,8 +637,8 @@ export class ExtensionController implements vscode.Disposable {
 				cssVariableName,
 				tailwindClass,
 				cssClassName,
-variableContexts: variableContexts.length ? variableContexts : undefined,
-			section: payload?.panel ?? 'summary'
+				variableContexts: variableContexts.length ? variableContexts : undefined,
+				section: payload?.panel ?? 'summary'
 			};
 
 			const panel = payload?.panel ?? 'summary';
@@ -747,6 +747,13 @@ variableContexts: variableContexts.length ? variableContexts : undefined,
 			const start = new vscode.Position(payload.range.start.line, payload.range.start.character);
 			const end = new vscode.Position(payload.range.end.line, payload.range.end.character);
 			const range = new vscode.Range(start, end);
+			
+			// Validate range is within document bounds
+			if (start.line >= editor.document.lineCount || end.line >= editor.document.lineCount) {
+				await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_NO_COLOR));
+				return true;
+			}
+			
 			const candidate = payload.normalizedColor || payload.originalText || editor.document.getText(range);
 			const parsed = this.colorParser.parseColor(candidate);
 			if (!parsed) {
@@ -754,7 +761,31 @@ variableContexts: variableContexts.length ? variableContexts : undefined,
 				return true;
 			}
 
-			await this.performColorConversion(editor, range, parsed.vscodeColor, payload.format ?? parsed.formatPriority[0]);
+			// If source is 'panel', do the conversion directly (user clicked a format in the panel)
+			// Otherwise, show the formats panel (user clicked Convert quick action)
+			if (payload.source === 'panel' && payload.format) {
+				const formatted = this.colorFormatter.formatByFormat(parsed.vscodeColor, payload.format);
+				if (formatted) {
+					const success = await editor.edit(editBuilder => {
+						editBuilder.replace(range, formatted);
+					});
+					
+					if (success) {
+						// Calculate new range after replacement (text length may have changed)
+						const newEndCharacter = range.start.character + formatted.length;
+						const newRange = new vscode.Range(
+							range.start,
+							new vscode.Position(range.start.line, newEndCharacter)
+						);
+						
+						// Update formats panel with new range and current format
+						// This allows subsequent conversions to replace the correct text
+						await this.performColorConversion(editor, newRange, parsed.vscodeColor, payload.format);
+					}
+				}
+			} else {
+				await this.performColorConversion(editor, range, parsed.vscodeColor, parsed.formatPriority[0]);
+			}
 			return true;
 		} catch (error) {
 			console.error(`${LOG_PREFIX} failed to convert color from payload`, error);
