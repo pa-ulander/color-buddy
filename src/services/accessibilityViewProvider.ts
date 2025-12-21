@@ -309,6 +309,29 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 			flex-direction: column;
 			gap: 0.35rem;
 		}
+		.cb-format-item {
+			display: flex;
+			align-items: center;
+			gap: 0.5rem;
+			padding: 0.5rem;
+			border-radius: 4px;
+			transition: background-color 0.2s;
+		}
+		.cb-format-item:hover {
+			background: var(--vscode-list-hoverBackground);
+		}
+		.cb-format-item.cb-current {
+			background: var(--vscode-list-activeSelectionBackground, rgba(0, 122, 204, 0.15));
+			border-left: 3px solid var(--vscode-charts-green, #22c55e);
+			padding-left: calc(0.5rem - 3px);
+		}
+		.cb-format-check {
+			color: var(--vscode-charts-green, #22c55e);
+			font-weight: bold;
+			font-size: 1rem;
+			width: 1.2rem;
+			flex-shrink: 0;
+		}
 		.cb-empty {
 			text-align: center;
 			padding: 2rem 1rem;
@@ -361,7 +384,7 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 		let message: string;
 		switch (this.section) {
 			case 'summary':
-				message = 'Click on a CSS rule or color in the editor to see an accessibility summary.';
+				message = 'Hover on a CSS rule or color in the editor to see an accessibility summary.';
 				break;
 			case 'contrast':
 				message = 'Trigger "Test accessibility" to see accessibility test results.';
@@ -752,7 +775,7 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 			return `
 			<div class="cb-context-entry" style="cursor: pointer;">
 				<p class="cb-context-label">
-					<a href="${commandUri}" style="color: var(--vscode-textLink-foreground); text-decoration: none;">
+					<a href="${commandUri}" style="color: var(--vscode-textLink-foreground); text-decoration: none; word-break: break-all; overflow-wrap: break-word;">
 						${this.escapeHtml(match.relativePath)}:${lineNumber}
 					</a>
 				</p>
@@ -806,7 +829,7 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 				<header class="cb-section-header">
 					<div>
 						<p class="cb-eyebrow">Find Usages</p>
-						<h3>Results for: ${this.escapeHtml(searchValue)}</h3>
+						<h4>Results for: ${this.escapeHtml(searchValue)}</h4>
 					</div>
 					<div class="cb-toolbar-meta">
 						<span>${resultsText}</span>
@@ -825,24 +848,56 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 		}
 
 		const currentValue = data.currentFormatValue;
+		
+		// Only render convert icons for literal colors (not CSS variables/classes)
+		// References can be copied but not directly converted
+		const isReference = data.cssVariableName || data.tailwindClass || data.cssClassName;
+		const hasEditorContext = data.editorUri && data.editorRange && !isReference;
+		
 		const listItems = data.conversions.map(conversion => {
 			const isCurrent = conversion.value === currentValue;
 			const label = this.getFormatLabel(conversion.format);
 			
-			// Build payload for copy command
-			const payload = {
+			// Build payload for convert command - converts the original color in the editor
+			// Only create convert payload if we have valid editor context
+			let convertIcon = '';
+			if (hasEditorContext) {
+				const convertPayload = {
+					uri: data.editorUri!,
+					range: {
+						start: { line: data.editorRange!.start.line, character: data.editorRange!.start.character },
+						end: { line: data.editorRange!.end.line, character: data.editorRange!.end.character }
+					},
+					normalizedColor: data.normalizedColor,
+					originalText: data.currentFormatValue,
+					format: conversion.format,
+					source: 'panel' as const
+					};
+				const convertEncodedPayload = encodeURIComponent(JSON.stringify(convertPayload));
+				const convertCommandUri = `command:colorbuddy.convertColorFormat?${convertEncodedPayload}`;
+				convertIcon = `<a href="${convertCommandUri}" class="cb-convert-icon" title="Convert to ${this.escapeHtml(label)}" style="color: var(--vscode-textLink-foreground); text-decoration: none; cursor: pointer;"><i class="codicon codicon-symbol-color"></i></a>`;
+			}
+			
+			// Also keep copy functionality
+			const copyPayload = {
 				value: conversion.value,
 				format: conversion.format,
 				label: label
 			};
-			const encodedPayload = encodeURIComponent(JSON.stringify(payload));
-			const commandUri = `command:colorbuddy.copyColorAs?${encodedPayload}`;
-			const copyIcon = `<a href="${commandUri}" class="cb-copy-icon" title="Copy to clipboard"><i class="codicon codicon-copy"></i></a>`;
+			const copyEncodedPayload = encodeURIComponent(JSON.stringify(copyPayload));
+			const copyCommandUri = `command:colorbuddy.copyColorAs?${copyEncodedPayload}`;
+			const copyIcon = `<a href="${copyCommandUri}" class="cb-copy-icon" title="Copy to clipboard" style="margin-left: 0.5rem; opacity: 0.7; cursor: pointer;"><i class="codicon codicon-copy"></i></a>`;
+			
+			// Show green checkmark for current format
+			const checkmark = isCurrent ? `<span class="cb-format-check">✓</span>` : `<span class="cb-format-check" style="visibility: hidden;">✓</span>`;
 			
 			return `<li class="cb-format-item ${isCurrent ? 'cb-current' : ''}">
-				<strong>${this.escapeHtml(label)}:</strong> 
-				<code>${this.escapeHtml(conversion.value)}</code>
-				${copyIcon}
+				${checkmark}
+				<div style="flex: 1;">
+					<strong>${this.escapeHtml(label)}:</strong> 
+					<code>${this.escapeHtml(conversion.value)}</code>
+				</div>
+				${convertIcon}${copyIcon}
 			</li>`;
 		}).join('');
 
@@ -850,7 +905,8 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 			<section class="cb-card">
 				<header class="cb-section-header">
 					<div>
-						<h3>${this.escapeHtml(t(LocalizedStrings.TOOLTIP_FORMATS_AVAILABLE))}</h3>
+						<p class="cb-eyebrow">Converting</p>
+						<h3><code>${this.escapeHtml(data.currentFormatValue || data.label)}</code></h3>
 					</div>
 				</header>
 				<ul class="cb-list cb-format-list">
