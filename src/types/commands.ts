@@ -1,7 +1,7 @@
 import type { ColorFormat } from './color';
 
 export type CopyColorCommandSource = 'hover' | 'statusBar' | 'command';
-export type ConvertColorCommandSource = CopyColorCommandSource;
+export type ConvertColorCommandSource = CopyColorCommandSource | 'panel';
 
 export interface SerializedPosition {
 	line: number;
