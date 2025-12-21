@@ -8,6 +8,12 @@ export function buildConvertColorCommandPayload(
 		return undefined;
 	}
 
+	// Don't allow conversion of CSS variables, Tailwind classes, or CSS classes
+	// These are references, not literal colors, so they can't be directly converted
+	if (data.isCssVariable || data.isTailwindClass || data.isCssClass) {
+		return undefined;
+	}
+
 	return {
 		uri: data.documentUri.toString(),
 		range: {
