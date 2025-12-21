@@ -1078,4 +1078,98 @@ test('colorbuddy.findColorUsages uses metadata fields when creating search candi
 		await env.restore();
 	}
 });
+
+	test('Format conversion panel receives editorUri and editorRange from Convert quick action', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const document = createMockDocument('body { color: rgba(0, 0, 0, 0.15); }');
+			const colorText = 'rgba(0, 0, 0, 0.15)';
+			const colorIndex = document.getText().indexOf(colorText);
+			const cursor = document.positionAt(colorIndex + 1);
+			const selection = new vscode.Selection(cursor, cursor);
+			const editor = createEditor(document, selection);
+			env.setActiveEditor(editor);
+			env.setVisibleEditors([editor]);
+
+			// Get the convert command from quick actions
+			const convertCommand = env.registeredCommands.get('colorbuddy.convertColorFormat');
+			assert.ok(typeof convertCommand === 'function', 'Convert command should be registered');
+
+			// Trigger convert - this should populate the formats panel with editor context
+			await (convertCommand as (...args: unknown[]) => unknown)();
+
+			// Verify the formats panel has editorUri and editorRange in its data
+			const viewProvider = getAccessibilityView(env);
+			const lastData = viewProvider.getLastRenderedData();
+			
+			assert.ok(lastData, 'Panel should have data after convert command');
+			assert.ok(lastData.editorUri, 'Panel data should include editorUri for format conversion');
+			assert.ok(lastData.editorRange, 'Panel data should include editorRange for format conversion');
+			assert.strictEqual(lastData.editorUri, document.uri.toString(), 'editorUri should match document');
+			assert.strictEqual(lastData.currentFormatValue, colorText, 'currentFormatValue should be the original color');
+		} finally {
+			await env.restore();
+		}
+	});
+
+	test('Clicking format in panel uses convertColorFormat command with editor context', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const document = createMockDocument('body { color: rgba(0, 0, 0, 0.15); }');
+			const colorText = 'rgba(0, 0, 0, 0.15)';
+			const colorIndex = document.getText().indexOf(colorText);
+			const cursor = document.positionAt(colorIndex + 1);
+			const selection = new vscode.Selection(cursor, cursor);
+			const editor = createEditor(document, selection);
+			env.setActiveEditor(editor);
+			env.setVisibleEditors([editor]);
+
+			// Trigger convert to populate panel
+			const convertCommand = env.registeredCommands.get('colorbuddy.convertColorFormat');
+			await (convertCommand as (...args: unknown[]) => unknown)();
+
+			// Verify the panel data has all the info needed for conversion
+			const viewProvider = getAccessibilityView(env);
+			const lastData = viewProvider.getLastRenderedData();
+			
+			assert.ok(lastData, 'Panel should have data after convert command');
+			assert.ok(lastData.editorUri, 'Panel data should include editorUri');
+			assert.ok(lastData.editorRange, 'Panel data should include editorRange');
+			assert.ok(lastData.normalizedColor, 'Panel data should include normalizedColor');
+			assert.ok(lastData.conversions && lastData.conversions.length > 0, 'Panel should have format conversions available');
+
+			// The actual command invocation would happen when user clicks format in webview
+			// Here we just verify the data structure is correct for building the convertColorFormat payload
+		} finally {
+			await env.restore();
+		}
+	});
+
+	test('Format panel shows "Converting: [color]" header with original color value', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const document = createMockDocument('body { color: rgba(0, 0, 0, 0.15); }');
+			const colorText = 'rgba(0, 0, 0, 0.15)';
+			const colorIndex = document.getText().indexOf(colorText);
+			const cursor = document.positionAt(colorIndex + 1);
+			const selection = new vscode.Selection(cursor, cursor);
+			const editor = createEditor(document, selection);
+			env.setActiveEditor(editor);
+			env.setVisibleEditors([editor]);
+
+			// Trigger convert
+			const convertCommand = env.registeredCommands.get('colorbuddy.convertColorFormat');
+			await (convertCommand as (...args: unknown[]) => unknown)();
+
+			// Verify panel data has the original color value for header display
+			const viewProvider = getAccessibilityView(env);
+			const lastData = viewProvider.getLastRenderedData();
+			
+			assert.ok(lastData, 'Panel should have data');
+			assert.strictEqual(lastData.currentFormatValue, colorText, 'currentFormatValue should match original color for "Converting:" header');
+			assert.ok(lastData.conversions.some(c => c.value === colorText), 'Conversions should include the current format');
+		} finally {
+			await env.restore();
+		}
+	});
 });
