@@ -111,7 +111,7 @@ export class ColorParser {
         
         return {
             vscodeColor: color,
-            cssString: this.rgbaString(color, false),
+            cssString: text.toLowerCase(), // Preserve original hex format
             formatPriority: this.getFormatPriority(originalFormat)
         };
     }
@@ -149,7 +149,7 @@ export class ColorParser {
 
         return {
             vscodeColor: color,
-            cssString: this.rgbaString(color, false),
+            cssString: raw.trim(), // Preserve original RGB/RGBA format
             formatPriority: this.getFormatPriority(originalFormat)
         };
     }
@@ -193,7 +193,7 @@ export class ColorParser {
 
         return {
             vscodeColor: color,
-            cssString: this.rgbaString(color, false),
+            cssString: raw.trim(), // Preserve original HSL/HSLA format
             formatPriority: this.getFormatPriority(originalFormat)
         };
     }
