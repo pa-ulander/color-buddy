@@ -207,7 +207,7 @@ export class Provider {
 
     private appendColorInsights(markdown: vscode.MarkdownString, color: vscode.Color): void {
         const insights = getColorInsights(color);
-        markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_COLOR_NAME)}:** ${insights.name} (\`${insights.hex}\`)\n\n`);
+        markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_COLOR_VALUE)}:** ${insights.name} (\`${insights.hex}\`)\n\n`);
         markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_BRIGHTNESS)}:** ${insights.brightness}%\n\n`);
     }
 
@@ -274,22 +274,6 @@ export class Provider {
             return;
         }
 
-        // Check if this is a Tailwind class
-        if (data.isTailwindClass && data.tailwindClass) {
-            const swatchUri = this.createColorSwatchDataUri(data.normalizedColor);
-            markdown.appendMarkdown(`### ${t(LocalizedStrings.TOOLTIP_TAILWIND_CLASS)}\n\n`);
-            markdown.appendMarkdown(`![color swatch](${swatchUri}) \`${data.tailwindClass}\`\n\n`);
-            markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_MAPS_TO)}:** \`${data.variableName}\`\n\n`);
-
-            this.appendColorInsights(markdown, data.vscodeColor);
-
-            markdown.appendMarkdown(`---\n\n`);
-        } else {
-            const swatchUri = this.createColorSwatchDataUri(data.normalizedColor);
-            markdown.appendMarkdown(`### ${t(LocalizedStrings.TOOLTIP_CSS_VARIABLE)}\n\n`);
-            markdown.appendMarkdown(`![color swatch](${swatchUri}) \`${data.originalText}\`\n\n`);
-        }
-        
         // Sort by specificity (root first, then themed variants)
         const sorted = [...declarations].sort((a, b) => a.context.specificity - b.context.specificity);
         
@@ -298,10 +282,32 @@ export class Provider {
         const darkDecl = sorted.find(d => d.context.themeHint === 'dark');
         const lightDecl = sorted.find(d => d.context.themeHint === 'light');
         const preferredCopyValue = (rootDecl ?? sorted[0])?.value?.trim();
+
+        // Check if this is a Tailwind class
+        if (data.isTailwindClass && data.tailwindClass) {
+            const swatchUri = this.createColorSwatchDataUri(data.normalizedColor);
+            markdown.appendMarkdown(`### ${t(LocalizedStrings.TOOLTIP_TAILWIND_CLASS)}\n\n`);
+            markdown.appendMarkdown(`![color swatch](${swatchUri}) \`${data.tailwindClass}\`\n\n`);
+            markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_MAPS_TO)}:** \`${data.variableName}\`\n\n`);
+
+            // Show actual defined color value instead of closest color name
+            const definedValue = (rootDecl ?? sorted[0])?.value ?? data.normalizedColor;
+            markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_COLOR_VALUE)}:** \`${definedValue}\`\n\n`);
+            markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_BRIGHTNESS)}:** ${getColorInsights(data.vscodeColor).brightness}%\n\n`);
+
+            markdown.appendMarkdown(`---\n\n`);
+        } else {
+            const swatchUri = this.createColorSwatchDataUri(data.normalizedColor);
+            markdown.appendMarkdown(`### ${t(LocalizedStrings.TOOLTIP_CSS_VARIABLE)}\n\n`);
+            markdown.appendMarkdown(`![color swatch](${swatchUri}) \`${data.originalText}\`\n\n`);
+        }
         
         if (!data.isTailwindClass) {
             markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_VARIABLE)}:** \`${data.variableName}\`\n\n`);
-            this.appendColorInsights(markdown, data.vscodeColor);
+            // Show actual defined color value instead of closest color name
+            const definedValue = (rootDecl ?? sorted[0])?.value ?? data.normalizedColor;
+            markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_COLOR_VALUE)}:** \`${definedValue}\`\n\n`);
+            markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_BRIGHTNESS)}:** ${getColorInsights(data.vscodeColor).brightness}%\n\n`);
             markdown.appendMarkdown(`---\n\n`);
         }
         
