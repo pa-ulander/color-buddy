@@ -106,6 +106,22 @@ suite('Command Integration', () => {
 		const originalProcessMaxListeners = process.getMaxListeners();
 		process.setMaxListeners(0);
 
+		// Mock workspace folders - use PROJECT_ROOT so fixture files are within workspace
+		const mockWorkspaceFolder: vscode.WorkspaceFolder = {
+			uri: vscode.Uri.file(PROJECT_ROOT),
+			name: 'colorbuddy',
+			index: 0
+		};
+		const originalWorkspaceFolders = vscode.workspace.workspaceFolders;
+		Object.defineProperty(vscode.workspace, 'workspaceFolders', {
+			configurable: true,
+			get: () => [mockWorkspaceFolder]
+		});
+		const originalGetWorkspaceFolder = vscode.workspace.getWorkspaceFolder;
+		(vscode.workspace as unknown as { getWorkspaceFolder: typeof vscode.workspace.getWorkspaceFolder }).getWorkspaceFolder = ((_uri: vscode.Uri) => {
+			return mockWorkspaceFolder;
+		}) as typeof vscode.workspace.getWorkspaceFolder;
+
 		const originalRegisterCommand = vscode.commands.registerCommand;
 		(vscode.commands as unknown as { registerCommand: typeof vscode.commands.registerCommand }).registerCommand = ((command: string, callback: (...args: unknown[]) => unknown) => {
 			registeredCommands.set(command, callback);
@@ -428,6 +444,11 @@ suite('Command Integration', () => {
 				(vscode.commands as unknown as { executeCommand: typeof vscode.commands.executeCommand }).executeCommand = originalExecuteCommand;
 				(vscode.workspace as unknown as { findFiles: typeof vscode.workspace.findFiles }).findFiles = originalFindFiles;
 				(vscode.workspace as unknown as { createFileSystemWatcher: typeof vscode.workspace.createFileSystemWatcher }).createFileSystemWatcher = originalCreateFileSystemWatcher;
+				(vscode.workspace as unknown as { getWorkspaceFolder: typeof vscode.workspace.getWorkspaceFolder }).getWorkspaceFolder = originalGetWorkspaceFolder;
+				Object.defineProperty(vscode.workspace, 'workspaceFolders', {
+					configurable: true,
+					value: originalWorkspaceFolders
+				});
 				(vscode.window as unknown as { onDidChangeActiveTextEditor: typeof vscode.window.onDidChangeActiveTextEditor }).onDidChangeActiveTextEditor = originalOnDidChangeActiveTextEditor;
 				(vscode.window as unknown as { onDidChangeVisibleTextEditors: typeof vscode.window.onDidChangeVisibleTextEditors }).onDidChangeVisibleTextEditors = originalOnDidChangeVisibleTextEditors;
 				(vscode.workspace as unknown as { onDidChangeTextDocument: typeof vscode.workspace.onDidChangeTextDocument }).onDidChangeTextDocument = originalOnDidChangeTextDocument;
@@ -1002,6 +1023,19 @@ suite('Command Integration', () => {
 			env.setVisibleEditors([editor]);
 			// Configure findFiles to return the fixture file
 			env.setFindFilesResults([FIND_COLOR_USAGE_FIXTURE_URI]);
+			
+			// Provide text search matches for the findTextInFiles callback
+			const matchRange = new vscode.Range(FIND_COLOR_USAGE_LINE_INDEX, 0, FIND_COLOR_USAGE_LINE_INDEX, 50);
+			env.setTextSearchMatches([
+				{
+					uri: FIND_COLOR_USAGE_FIXTURE_URI,
+					ranges: matchRange,
+					preview: {
+						text: FIND_COLOR_USAGE_LINES[FIND_COLOR_USAGE_LINE_INDEX],
+						matches: [matchRange]
+					}
+				} as vscode.TextSearchMatch
+			]);
 
 			await (command as (...args: unknown[]) => unknown)();
 
@@ -1057,6 +1091,14 @@ test('colorbuddy.findColorUsages uses metadata fields when creating search candi
 		// Set up workspace to have NO files - this ensures we hit the "no results" case
 		// But the important part is that the command TRIES to search for the correct values
 		env.setFindFilesResults([]);
+		
+		// Need an active editor for getActiveWorkspaceFolder() to work
+		const document = createMockDocument('body { color: #3b82f6; }');
+		const cursor = document.positionAt(0);
+		const selection = new vscode.Selection(cursor, cursor);
+		const editor = createEditor(document, selection);
+		env.setActiveEditor(editor);
+		env.setVisibleEditors([editor]);
 
 		const initialInfoCount = env.infoMessages.length;
 

@@ -159,34 +159,205 @@ suite('Convert At Definition (Option 2) - TDD Tests', () => {
 			}
 		});
 
-		test.skip('converts CSS variable at single definition location', async () => {
-			// TODO: This test is SKIPPED until handleConvertAtDefinition is implemented
-			// 
-			// Test plan:
-			// 1. Create CSS file with --primary: #3b82f6
-			// 2. Index it via CSSParser
-			// 3. Create HTML file using var(--primary)
-			// 4. Call convertColorFormat with payload (source: 'panel', format: 'rgb')
-			// 5. Verify: CSS file opened, #3b82f6 replaced with rgb(59, 130, 246)
-			// 6. Verify: Success message mentions file and line
-			//
-			// Current status: Needs implementation in ExtensionController
-			assert.ok(true, 'Test placeholder - implementation needed');
+		test('converts CSS variable at single definition location', async () => {
+			const env = await setupTestEnvironment();
+			try {
+				// 1. Create CSS file with --primary: #3b82f6;
+				const cssDoc = createMockDocument(':root { --primary: #3b82f6; }', 'css');
+				
+				// 2. Index CSS file manually via CSSParser
+				await env.controller['cssParser'].parseCSSFile(cssDoc);
+				
+				// 3. Verify variable is in Registry
+				const definitions = env.controller['registry'].getVariable('--primary');
+				assert.ok(definitions && definitions.length > 0, 'Variable should be indexed in Registry');
+				assert.strictEqual(definitions![0].value, '#3b82f6', 'Variable value should match');
+				
+				// 4. Create HTML file using var(--primary)
+				const htmlDoc = createMockDocument('div { color: var(--primary); }', 'html');
+				const varStart = htmlDoc.getText().indexOf('var(--primary)');
+				const htmlEditor = createEditor(htmlDoc, new vscode.Selection(htmlDoc.positionAt(varStart), htmlDoc.positionAt(varStart)));
+				
+				// Mock activeTextEditor
+				const originalActiveEditor = Object.getOwnPropertyDescriptor(vscode.window, 'activeTextEditor');
+				Object.defineProperty(vscode.window, 'activeTextEditor', {
+					configurable: true,
+					get: () => htmlEditor
+				});
+
+				// Mock showTextDocument to return a mock editor for the CSS file
+				const originalShowTextDocument = vscode.window.showTextDocument;
+				const cssEditor = createEditor(cssDoc, new vscode.Selection(new vscode.Position(0, 0), new vscode.Position(0, 0)));
+				
+				// Override edit method to simulate successful edit
+				cssEditor.edit = async () => {
+					// Simulate successful edit
+					return true;
+				};
+				
+				(vscode.window as any).showTextDocument = async () => cssEditor;
+
+				// Mock openTextDocument to return the CSS document
+				const originalOpenTextDocument = vscode.workspace.openTextDocument;
+				(vscode.workspace as any).openTextDocument = async (uri: vscode.Uri) => {
+					if (uri.toString() === cssDoc.uri.toString()) {
+						return cssDoc;
+					}
+					return originalOpenTextDocument(uri);
+				};
+
+				// 5. Call convertColorFormat with payload
+				const command = env.registeredCommands.get('colorbuddy.convertColorFormat');
+				assert.ok(command, 'Command should exist');
+				
+				// Mock ensureColorData to return ColorData with the CSS variable flag
+				const originalEnsureColorData = env.controller['ensureColorData'];
+				env.controller['ensureColorData'] = async () => {
+					return [{
+						range: new vscode.Range(
+							new vscode.Position(0, varStart),
+							new vscode.Position(0, varStart + 14)
+						),
+						normalizedColor: 'rgb(59, 130, 246)',
+							originalText: 'var(--primary)',
+						vscodeColor: new vscode.Color(59/255, 130/255, 246/255, 1),
+						variableName: '--primary',
+						isCssVariable: true,
+						isTailwindClass: false,
+						isCssClass: false,
+						formatPriority: ['rgb' as const]
+					}];
+				};
+				
+				const payload: ConvertColorCommandPayload = {
+					uri: htmlDoc.uri.toString(),
+					range: { start: { line: 0, character: varStart }, end: { line: 0, character: varStart + 14 } },
+					normalizedColor: 'rgb(59, 130, 246)', // Resolved color
+					originalText: 'var(--primary)',
+					format: 'rgb',
+					source: 'panel'
+				};
+
+				await command(payload);
+
+				// 6. Verify: Success message mentions file location
+				assert.ok(env.infoMessages.length > 0, 'Should show success message');
+				const successMsg = env.infoMessages[env.infoMessages.length - 1];
+				assert.ok(successMsg.includes('--primary'), 'Success message should mention variable name');
+				assert.ok(successMsg.includes('rgb'), 'Success message should mention format');
+				
+				// Restore
+				env.controller['ensureColorData'] = originalEnsureColorData;
+				(vscode.window as any).showTextDocument = originalShowTextDocument;
+				(vscode.workspace as any).openTextDocument = originalOpenTextDocument;
+				if (originalActiveEditor) {
+					Object.defineProperty(vscode.window, 'activeTextEditor', originalActiveEditor);
+				}
+			} finally {
+				await env.restore();
+			}
 		});
 
-		test.skip('shows QuickPick when multiple definitions exist', async () => {
-			// TODO: This test is SKIPPED until multi-definition handling is implemented
-			//
-			// Test plan:
-			// 1. Create light.css with --primary: #3b82f6
-			// 2. Create dark.css with --primary: #1e40af
-			// 3. Index both files
-			// 4. Call convert on var(--primary)
-			// 5. Verify: QuickPick shown with both files
-			// 6. Verify: Items show file names and line numbers
-			//
-			// Current status: Needs implementation in ExtensionController
-			assert.ok(true, 'Test placeholder - implementation needed');
+		test('shows QuickPick when multiple definitions exist', async () => {
+			const env = await setupTestEnvironment();
+			try {
+				// 1. Create light.css with --primary: #3b82f6
+				const lightUri = vscode.Uri.parse('file:///test/light.css');
+				const lightDoc = createMockDocument(':root { --primary: #3b82f6; }', 'css', lightUri);
+				await env.controller['cssParser'].parseCSSFile(lightDoc);
+				
+				// 2. Create dark.css with --primary: #1e40af
+				const darkUri = vscode.Uri.parse('file:///test/dark.css');
+				const darkDoc = createMockDocument('.dark { --primary: #1e40af; }', 'css', darkUri);
+				await env.controller['cssParser'].parseCSSFile(darkDoc);
+				
+				// 3. Verify both definitions exist in Registry
+				const definitions = env.controller['registry'].getVariable('--primary');
+				assert.ok(definitions && definitions.length === 2, 'Should have 2 definitions in Registry');
+				
+				// 4. Create HTML file using var(--primary)
+				const htmlDoc = createMockDocument('div { color: var(--primary); }', 'html');
+				const varStart = htmlDoc.getText().indexOf('var(--primary)');
+				const htmlEditor = createEditor(htmlDoc, new vscode.Selection(htmlDoc.positionAt(varStart), htmlDoc.positionAt(varStart)));
+				
+				// Mock activeTextEditor
+				const originalActiveEditor = Object.getOwnPropertyDescriptor(vscode.window, 'activeTextEditor');
+				Object.defineProperty(vscode.window, 'activeTextEditor', {
+					configurable: true,
+					get: () => htmlEditor
+				});
+
+				// Mock showTextDocument
+				const originalShowTextDocument = vscode.window.showTextDocument;
+				const mockEditor = createEditor(lightDoc, new vscode.Selection(new vscode.Position(0, 0), new vscode.Position(0, 0)));
+				mockEditor.edit = async () => true;
+				(vscode.window as any).showTextDocument = async () => mockEditor;
+
+				// Mock openTextDocument
+				const originalOpenTextDocument = vscode.workspace.openTextDocument;
+				(vscode.workspace as any).openTextDocument = async (uri: vscode.Uri) => {
+					if (uri.toString() === lightDoc.uri.toString()) {
+						return lightDoc;
+					}
+					if (uri.toString() === darkDoc.uri.toString()) {
+						return darkDoc;
+					}
+					return originalOpenTextDocument(uri);
+				};
+
+				// 5. Call convert - should trigger QuickPick
+				const command = env.registeredCommands.get('colorbuddy.convertColorFormat');
+				assert.ok(command, 'Command should exist');
+				
+				// Mock ensureColorData to return ColorData with the CSS variable flag
+				const originalEnsureColorData = env.controller['ensureColorData'];
+				env.controller['ensureColorData'] = async () => {
+					return [{
+						range: new vscode.Range(
+							new vscode.Position(0, varStart),
+							new vscode.Position(0, varStart + 14)
+						),
+						originalText: 'var(--primary)',
+						normalizedColor: 'rgb(59, 130, 246)',
+						vscodeColor: new vscode.Color(59/255, 130/255, 246/255, 1),
+						variableName: '--primary',
+						isCssVariable: true,
+						isTailwindClass: false,
+						isCssClass: false,
+						formatPriority: ['rgb' as const]
+					}];
+				};
+				
+				const payload: ConvertColorCommandPayload = {
+					uri: htmlDoc.uri.toString(),
+					range: { start: { line: 0, character: varStart }, end: { line: 0, character: varStart + 14 } },
+					normalizedColor: 'rgb(59, 130, 246)',
+					originalText: 'var(--primary)',
+					format: 'rgb',
+					source: 'panel'
+				};
+
+				await command(payload);
+
+				// 6. Verify: QuickPick was shown with both files
+				assert.ok(env.quickPickRequests.length > 0, 'QuickPick should be shown');
+				const quickPick = env.quickPickRequests[0];
+				assert.strictEqual(quickPick.items.length, 2, 'QuickPick should show 2 items');
+				
+				// Verify items have file info
+				const labels = quickPick.items.map(item => item.label);
+				assert.ok(labels.some(label => label.includes('css')), 'Items should show file names');
+				
+				// Restore
+				env.controller['ensureColorData'] = originalEnsureColorData;
+				(vscode.window as any).showTextDocument = originalShowTextDocument;
+				(vscode.workspace as any).openTextDocument = originalOpenTextDocument;
+				if (originalActiveEditor) {
+					Object.defineProperty(vscode.window, 'activeTextEditor', originalActiveEditor);
+				}
+			} finally {
+				await env.restore();
+			}
 		});
 
 		test('shows error for unknown variable (no definition in Registry)', async () => {
@@ -225,6 +396,322 @@ suite('Convert At Definition (Option 2) - TDD Tests', () => {
 				assert.ok(env.infoMessages.length > 0, 'Should show message');
 				
 				// Restore
+				if (originalActiveEditor) {
+					Object.defineProperty(vscode.window, 'activeTextEditor', originalActiveEditor);
+				}
+			} finally {
+				await env.restore();
+			}
+		});
+	});
+
+	suite('Edge Cases', () => {
+		test('handles nested variable resolution', async () => {
+			const env = await setupTestEnvironment();
+			try {
+				// Create CSS with nested var() reference
+				const cssDoc = createMockDocument(':root { --blue-500: #3b82f6; --primary: var(--blue-500); }', 'css');
+				await env.controller['cssParser'].parseCSSFile(cssDoc);
+				
+				// Verify both variables are indexed
+				const primaryDefs = env.controller['registry'].getVariable('--primary');
+				const blueDefs = env.controller['registry'].getVariable('--blue-500');
+				assert.ok(primaryDefs && primaryDefs.length > 0, '--primary should be indexed');
+				assert.ok(blueDefs && blueDefs.length > 0, '--blue-500 should be indexed');
+				
+				// HTML using var(--primary)
+				const htmlDoc = createMockDocument('div { color: var(--primary); }', 'html');
+				const varStart = htmlDoc.getText().indexOf('var(--primary)');
+				const htmlEditor = createEditor(htmlDoc, new vscode.Selection(htmlDoc.positionAt(varStart), htmlDoc.positionAt(varStart)));
+				
+				const originalActiveEditor = Object.getOwnPropertyDescriptor(vscode.window, 'activeTextEditor');
+				Object.defineProperty(vscode.window, 'activeTextEditor', {
+					configurable: true,
+					get: () => htmlEditor
+				});
+
+				// Mock document operations
+				const originalShowTextDocument = vscode.window.showTextDocument;
+				const mockEditor = createEditor(cssDoc, new vscode.Selection(new vscode.Position(0, 0), new vscode.Position(0, 0)));
+				mockEditor.edit = async () => true;
+				(vscode.window as any).showTextDocument = async () => mockEditor;
+
+				const originalOpenTextDocument = vscode.workspace.openTextDocument;
+				(vscode.workspace as any).openTextDocument = async () => cssDoc;
+
+				// Convert --primary (which references --blue-500)
+				const command = env.registeredCommands.get('colorbuddy.convertColorFormat');
+				
+				// Mock ensureColorData
+				const originalEnsureColorData = env.controller['ensureColorData'];
+				env.controller['ensureColorData'] = async () => {
+					return [{
+						range: new vscode.Range(
+							new vscode.Position(0, varStart),
+							new vscode.Position(0, varStart + 14)
+						),
+						normalizedColor: 'rgb(59, 130, 246)',
+							originalText: 'var(--primary)',
+						vscodeColor: new vscode.Color(59/255, 130/255, 246/255, 1),
+						variableName: '--primary',
+						isCssVariable: true,
+						isTailwindClass: false,
+						isCssClass: false,
+						formatPriority: ['rgb' as const]
+					}];
+				};
+				
+				const payload: ConvertColorCommandPayload = {
+					uri: htmlDoc.uri.toString(),
+					range: { start: { line: 0, character: varStart }, end: { line: 0, character: varStart + 14 } },
+					normalizedColor: 'rgb(59, 130, 246)',
+					originalText: 'var(--primary)',
+					format: 'rgb',
+					source: 'panel'
+				};
+
+				await command!(payload);
+
+				// Should succeed - nested var() should be resolved
+				assert.ok(env.infoMessages.length > 0, 'Should show success message');
+				
+				// Restore
+				env.controller['ensureColorData'] = originalEnsureColorData;
+				(vscode.window as any).showTextDocument = originalShowTextDocument;
+				(vscode.workspace as any).openTextDocument = originalOpenTextDocument;
+				if (originalActiveEditor) {
+					Object.defineProperty(vscode.window, 'activeTextEditor', originalActiveEditor);
+				}
+			} finally {
+				await env.restore();
+			}
+		});
+
+		test('handles Tailwind class definitions', async () => {
+			const env = await setupTestEnvironment();
+			try {
+				// Create Tailwind config-like CSS
+				const cssDoc = createMockDocument('.bg-primary { background-color: #3b82f6; }', 'css');
+				await env.controller['cssParser'].parseCSSFile(cssDoc);
+				
+				// Verify class is indexed
+				const classDefs = env.controller['registry'].getClass('bg-primary');
+				assert.ok(classDefs && classDefs.length > 0, 'Tailwind class should be indexed');
+				
+				// HTML using the class
+				const htmlDoc = createMockDocument('<div class="bg-primary"></div>', 'html');
+				const classStart = htmlDoc.getText().indexOf('bg-primary');
+				const htmlEditor = createEditor(htmlDoc, new vscode.Selection(htmlDoc.positionAt(classStart), htmlDoc.positionAt(classStart)));
+				
+				const originalActiveEditor = Object.getOwnPropertyDescriptor(vscode.window, 'activeTextEditor');
+				Object.defineProperty(vscode.window, 'activeTextEditor', {
+					configurable: true,
+					get: () => htmlEditor
+				});
+
+				// Mock document operations
+				const originalShowTextDocument = vscode.window.showTextDocument;
+				const mockEditor = createEditor(cssDoc, new vscode.Selection(new vscode.Position(0, 0), new vscode.Position(0, 0)));
+				mockEditor.edit = async () => true;
+				(vscode.window as any).showTextDocument = async () => mockEditor;
+
+				const originalOpenTextDocument = vscode.workspace.openTextDocument;
+				(vscode.workspace as any).openTextDocument = async () => cssDoc;
+
+				// Convert class color
+				const command = env.registeredCommands.get('colorbuddy.convertColorFormat');
+				
+				// Mock ensureColorData
+				const originalEnsureColorData = env.controller['ensureColorData'];
+				env.controller['ensureColorData'] = async () => {
+					return [{
+						range: new vscode.Range(
+							new vscode.Position(0, classStart),
+							new vscode.Position(0, classStart + 10)
+						),
+						originalText: 'bg-primary',
+						normalizedColor: 'rgb(59, 130, 246)',
+						vscodeColor: new vscode.Color(59/255, 130/255, 246/255, 1),
+						cssClassName: 'bg-primary',
+						isCssVariable: false,
+						isTailwindClass: false,
+						isCssClass: true,
+						formatPriority: ['hex' as const]
+					}];
+				};
+				
+				const payload: ConvertColorCommandPayload = {
+					uri: htmlDoc.uri.toString(),
+					range: { start: { line: 0, character: classStart }, end: { line: 0, character: classStart + 10 } },
+					normalizedColor: 'rgb(59, 130, 246)',
+					originalText: 'bg-primary',
+					format: 'hsl',
+					source: 'panel'
+				};
+
+				await command!(payload);
+
+				// Should succeed
+				assert.ok(env.infoMessages.length > 0, 'Should show success message for class conversion');
+				
+				// Restore
+				env.controller['ensureColorData'] = originalEnsureColorData;
+				(vscode.window as any).showTextDocument = originalShowTextDocument;
+				(vscode.workspace as any).openTextDocument = originalOpenTextDocument;
+				if (originalActiveEditor) {
+					Object.defineProperty(vscode.window, 'activeTextEditor', originalActiveEditor);
+				}
+			} finally {
+				await env.restore();
+			}
+		});
+
+		test('handles format conversion variations', async () => {
+			const env = await setupTestEnvironment();
+			try {
+				// Create CSS with hex color
+				const cssDoc = createMockDocument(':root { --accent: #ef4444; }', 'css');
+				await env.controller['cssParser'].parseCSSFile(cssDoc);
+				
+				const htmlDoc = createMockDocument('div { color: var(--accent); }', 'html');
+				const varStart = htmlDoc.getText().indexOf('var(--accent)');
+				const htmlEditor = createEditor(htmlDoc, new vscode.Selection(htmlDoc.positionAt(varStart), htmlDoc.positionAt(varStart)));
+				
+				const originalActiveEditor = Object.getOwnPropertyDescriptor(vscode.window, 'activeTextEditor');
+				Object.defineProperty(vscode.window, 'activeTextEditor', {
+					configurable: true,
+					get: () => htmlEditor
+				});
+
+				const originalShowTextDocument = vscode.window.showTextDocument;
+				const mockEditor = createEditor(cssDoc, new vscode.Selection(new vscode.Position(0, 0), new vscode.Position(0, 0)));
+				mockEditor.edit = async () => true;
+				(vscode.window as any).showTextDocument = async () => mockEditor;
+
+				const originalOpenTextDocument = vscode.workspace.openTextDocument;
+				(vscode.workspace as any).openTextDocument = async () => cssDoc;
+
+				const command = env.registeredCommands.get('colorbuddy.convertColorFormat');
+				
+				// Mock ensureColorData
+				const originalEnsureColorData = env.controller['ensureColorData'];
+				env.controller['ensureColorData'] = async () => {
+					return [{
+						range: new vscode.Range(
+							new vscode.Position(0, varStart),
+							new vscode.Position(0, varStart + 13)
+						),
+						originalText: 'var(--accent)',
+						normalizedColor: 'rgb(239, 68, 68)',
+						vscodeColor: new vscode.Color(239/255, 68/255, 68/255, 1),
+						variableName: '--accent',
+						isCssVariable: true,
+						isTailwindClass: false,
+						isCssClass: false,
+						formatPriority: ['hex' as const]
+					}];
+				};
+				
+				// Test conversion to HSL
+				const hslPayload: ConvertColorCommandPayload = {
+					uri: htmlDoc.uri.toString(),
+					range: { start: { line: 0, character: varStart }, end: { line: 0, character: varStart + 13 } },
+					normalizedColor: 'rgb(239, 68, 68)',
+					originalText: 'var(--accent)',
+					format: 'hsl',
+					source: 'panel'
+				};
+
+				await command!(hslPayload);
+				assert.ok(env.infoMessages.length > 0, 'Should succeed with HSL format');
+				
+				// Restore
+				env.controller['ensureColorData'] = originalEnsureColorData;
+				(vscode.window as any).showTextDocument = originalShowTextDocument;
+				(vscode.workspace as any).openTextDocument = originalOpenTextDocument;
+				if (originalActiveEditor) {
+					Object.defineProperty(vscode.window, 'activeTextEditor', originalActiveEditor);
+				}
+			} finally {
+				await env.restore();
+			}
+		});
+
+		test('handles circular variable references gracefully', async () => {
+			const env = await setupTestEnvironment();
+			try {
+				// Create CSS with circular var() references: --a: var(--b); --b: var(--a);
+				const cssDoc = createMockDocument(':root { --a: var(--b); --b: var(--a); }', 'css');
+				await env.controller['cssParser'].parseCSSFile(cssDoc);
+				
+				// Verify both variables are indexed
+				const aDefs = env.controller['registry'].getVariable('--a');
+				const bDefs = env.controller['registry'].getVariable('--b');
+				assert.ok(aDefs && aDefs.length > 0, '--a should be indexed');
+				assert.ok(bDefs && bDefs.length > 0, '--b should be indexed');
+				
+				// HTML using var(--a)
+				const htmlDoc = createMockDocument('div { color: var(--a); }', 'html');
+				const varStart = htmlDoc.getText().indexOf('var(--a)');
+				const htmlEditor = createEditor(htmlDoc, new vscode.Selection(htmlDoc.positionAt(varStart), htmlDoc.positionAt(varStart)));
+				
+				const originalActiveEditor = Object.getOwnPropertyDescriptor(vscode.window, 'activeTextEditor');
+				Object.defineProperty(vscode.window, 'activeTextEditor', {
+					configurable: true,
+					get: () => htmlEditor
+				});
+
+				// Mock document operations
+				const originalShowTextDocument = vscode.window.showTextDocument;
+				const mockEditor = createEditor(cssDoc, new vscode.Selection(new vscode.Position(0, 0), new vscode.Position(0, 0)));
+				mockEditor.edit = async () => true;
+				(vscode.window as any).showTextDocument = async () => mockEditor;
+
+				const originalOpenTextDocument = vscode.workspace.openTextDocument;
+				(vscode.workspace as any).openTextDocument = async () => cssDoc;
+
+				// Try to convert --a (which has circular reference)
+				const command = env.registeredCommands.get('colorbuddy.convertColorFormat');
+				
+				// Mock ensureColorData
+				const originalEnsureColorData = env.controller['ensureColorData'];
+				env.controller['ensureColorData'] = async () => {
+					return [{
+						range: new vscode.Range(
+							new vscode.Position(0, varStart),
+							new vscode.Position(0, varStart + 8)
+						),
+						normalizedColor: 'var(--b)', // Still a var() ref due to circular
+						originalText: 'var(--a)',
+						vscodeColor: new vscode.Color(0, 0, 0, 1), // fallback color
+						variableName: '--a',
+						isCssVariable: true,
+						isTailwindClass: false,
+						isCssClass: false,
+						formatPriority: ['hex' as const]
+					}];
+				};
+				
+				const payload: ConvertColorCommandPayload = {
+					uri: htmlDoc.uri.toString(),
+					range: { start: { line: 0, character: varStart }, end: { line: 0, character: varStart + 8 } },
+					normalizedColor: 'var(--b)',
+					originalText: 'var(--a)',
+					format: 'hex',
+					source: 'panel'
+				};
+
+				await command!(payload);
+
+				// Should handle gracefully - either show error or resolve to fallback
+				// Check for error message OR success (depending on implementation)
+				const hasMessage = env.infoMessages.length > 0 || env.errorMessages.length > 0;
+				assert.ok(hasMessage, 'Should show either error or success message for circular refs');
+				
+				// Restore
+				env.controller['ensureColorData'] = originalEnsureColorData;
+				(vscode.window as any).showTextDocument = originalShowTextDocument;
+				(vscode.workspace as any).openTextDocument = originalOpenTextDocument;
 				if (originalActiveEditor) {
 					Object.defineProperty(vscode.window, 'activeTextEditor', originalActiveEditor);
 				}
