@@ -37,10 +37,10 @@ function assertClose(actual: number, expected: number, epsilon = 0.01) {
 }
 
 suite('Color parsing', () => {
-	test('hex colors normalize to rgb and keep hex priority', () => {
+	test('hex colors preserve format and keep hex priority', () => {
 		const parsed = colorParser.parseColor('#ff0000');
 		assertDefined(parsed, 'Expected hex color to parse');
-		assert.strictEqual(parsed.cssString, 'rgb(255, 0, 0)');
+		assert.strictEqual(parsed.cssString, '#ff0000', 'cssString should preserve hex format');
 		assert.strictEqual(parsed.formatPriority[0], 'hex');
 		assertClose(parsed.vscodeColor.red, 1);
 		assertClose(parsed.vscodeColor.green, 0);
@@ -218,7 +218,7 @@ suite('Default language literal pipeline', () => {
 			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_FORMATS_AVAILABLE)), `hover should list additional formats for ${language}`);
 			assert.ok(hoverContents.value.includes('command:colorbuddy.copyColorAs?'), `hover should include copy command links for ${language}`);
 			assert.ok(hoverContents.value.includes('$(clippy)'), `hover should surface copy icon affordance for ${language}`);
-			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_COLOR_NAME)), `hover should surface color naming for ${language}`);
+			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_COLOR_VALUE)), `hover should surface color value for ${language}`);
 			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_BRIGHTNESS)), `hover should surface brightness metadata for ${language}`);
 			assert.ok(hoverContents.value.includes(t(LocalizedStrings.STATUS_BAR_USAGE_COUNT)), `hover should surface usage count for ${language}`);
 			assert.ok(hoverContents.value.includes(t(LocalizedStrings.TOOLTIP_WCAG_STATUS)), `hover should surface WCAG status heading for ${language}`);
@@ -267,7 +267,7 @@ suite('Default language literal pipeline', () => {
 						conversions
 					);
 				assert.ok(tooltip.value.includes('$(clippy)'), 'status bar tooltip should surface copy icon affordance');
-				assert.ok(tooltip.value.includes(t(LocalizedStrings.TOOLTIP_COLOR_NAME)), 'status bar tooltip should include color name');
+				assert.ok(tooltip.value.includes(t(LocalizedStrings.TOOLTIP_COLOR_VALUE)), 'status bar tooltip should include color value');
 				assert.ok(tooltip.value.includes(t(LocalizedStrings.TOOLTIP_BRIGHTNESS)), 'status bar tooltip should include brightness metadata');
 				assert.ok(tooltip.value.includes(t(LocalizedStrings.TOOLTIP_WCAG_STATUS)), 'status bar tooltip should include WCAG status heading');
 				assert.ok(tooltip.value.includes('#22c55e') || tooltip.value.includes('#ef4444'), 'status bar tooltip should surface colored pass/fail icons');
