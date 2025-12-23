@@ -38,7 +38,7 @@ const QUICK_ACTIONS: QuickAction[] = [
 export function appendQuickActions(markdown: vscode.MarkdownString, options?: AppendQuickActionsOptions): void {
 	const surface: QuickActionSurface = options?.surface ?? 'hover';
 	
-	// Always show all actions but mark convert as disabled if no override
+	// All actions are always enabled (Option 2: convert works for all colors)
 	const links = QUICK_ACTIONS.map(action => {
 		const payload: QuickActionLinkPayload = {
 			target: action.command,
@@ -47,9 +47,6 @@ export function appendQuickActions(markdown: vscode.MarkdownString, options?: Ap
 
 		const override = options?.overrides?.[action.command];
 		let args = override?.args ?? action.args;
-		
-		// Check if this action should be disabled (no override for convert)
-		const isDisabled = action.command === 'colorbuddy.convertColorFormat' && !override;
 		
 		// Merge default action args with override args for testColorAccessibility
 		// This preserves the panel parameter from the action while using the override payload
@@ -66,15 +63,8 @@ export function appendQuickActions(markdown: vscode.MarkdownString, options?: Ap
 		const encodedPayload = encodeURIComponent(JSON.stringify(payload));
 		const title = action.label.replace(/"/g, '\\"');
 		
-		// Render as button-like markdown with disabled state
-		// Use markdown code block styling for button appearance
-		if (isDisabled) {
-			// Disabled: plain text with strike-through to indicate unavailable
-			return `~~\`${action.label}\`~~`;
-		} else {
-			// Enabled: clickable code-styled link
-			return `[\`${action.label}\`](command:${EXECUTE_QUICK_ACTION_COMMAND}?${encodedPayload} "${title}")`;
-		}
+		// Render as clickable code-styled link
+		return `[\`${action.label}\`](command:${EXECUTE_QUICK_ACTION_COMMAND}?${encodedPayload} "${title}")`;
 	});
 
 	markdown.appendMarkdown(`**${t(LocalizedStrings.COMMAND_QUICK_ACTIONS_TITLE)}:** \n\n ${links.join(' | ')}\n\n`);
