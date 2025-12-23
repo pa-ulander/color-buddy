@@ -27,66 +27,69 @@ suite('QuickActions', () => {
 			assert.ok(content.includes('colorbuddy.convertColorFormat'), 'Should include convert command');
 		});
 		
-		test('should show convert action as disabled for CSS variables (no override)', () => {
-			const markdown = new vscode.MarkdownString();
-			// No convert override provided for CSS variable reference
-			const overrides = {
-				'colorbuddy.copyColorAs': {
-					args: [{
-						value: 'rgb(255, 0, 0)',
-						format: 'rgb',
-						source: 'hover'
-					}]
-				}
-			};
-			
-			appendQuickActions(markdown, { surface: 'hover', overrides });
-			const content = markdown.value;
-			
-			// Should include convert action but as disabled (strike-through)
-			assert.ok(content.includes('Copy'), 'Should include Copy action');
-			assert.ok(content.includes('Convert'), 'Should include Convert action for CSS variables');
-			assert.ok(content.includes('~~`Convert`~~'), 'Should mark Convert as disabled with strike-through');
+test('should show convert action for CSS variables (Option 2: convert-at-definition)', () => {
+		const markdown = new vscode.MarkdownString();
+		// No convert override provided, but action is still enabled (Option 2)
+		const overrides = {
+			'colorbuddy.copyColorAs': {
+				args: [{
+					value: 'rgb(255, 0, 0)',
+					format: 'rgb',
+					source: 'hover'
+				}]
+			}
+		};
+		
+		appendQuickActions(markdown, { surface: 'hover', overrides });
+		const content = markdown.value;
+		
+		// Should include convert action as enabled (Option 2: converts at definition)
+		assert.ok(content.includes('Copy'), 'Should include Copy action');
+		assert.ok(content.includes('Convert'), 'Should include Convert action for CSS variables');
+		assert.ok(!content.includes('~~`Convert`~~'), 'Convert should NOT be disabled (Option 2 support)');
+		assert.ok(content.includes('[`Convert`]'), 'Convert should be clickable link');
 		});
 		
-		test('should show convert action as disabled for Tailwind classes (no override)', () => {
-			const markdown = new vscode.MarkdownString();
-			const overrides = {
-				'colorbuddy.copyColorAs': {
-					args: [{
-						value: 'rgb(255, 0, 0)',
-						format: 'rgb',
-						source: 'hover'
-					}]
-				}
-			};
-			
-			appendQuickActions(markdown, { surface: 'hover', overrides });
-			const content = markdown.value;
-			
-			assert.ok(content.includes('Copy'), 'Should include Copy action');
-			assert.ok(content.includes('Convert'), 'Should include Convert action');
-			assert.ok(content.includes('~~`Convert`~~'), 'Should mark Convert as disabled with strike-through');
+test('should show convert action for Tailwind classes (Option 2: convert-at-definition)', () => {
+		const markdown = new vscode.MarkdownString();
+		const overrides = {
+			'colorbuddy.copyColorAs': {
+				args: [{
+					value: 'rgb(255, 0, 0)',
+					format: 'rgb',
+					source: 'hover'
+				}]
+			}
+		};
+		
+		appendQuickActions(markdown, { surface: 'hover', overrides });
+		const content = markdown.value;
+		
+		assert.ok(content.includes('Copy'), 'Should include Copy action');
+		assert.ok(content.includes('Convert'), 'Should include Convert action');
+		assert.ok(!content.includes('~~`Convert`~~'), 'Convert should NOT be disabled (Option 2 support)');
+		assert.ok(content.includes('[`Convert`]'), 'Convert should be clickable link');
 		});
 		
-		test('should show convert action as disabled for CSS class names (no override)', () => {
-			const markdown = new vscode.MarkdownString();
-			const overrides = {
-				'colorbuddy.copyColorAs': {
-					args: [{
-						value: 'rgb(255, 0, 0)',
-						format: 'rgb',
-						source: 'hover'
-					}]
-				}
-			};
-			
-			appendQuickActions(markdown, { surface: 'hover', overrides });
-			const content = markdown.value;
-			
-			assert.ok(content.includes('Copy'), 'Should include Copy action');
-			assert.ok(content.includes('Convert'), 'Should include Convert action');
-			assert.ok(content.includes('~~`Convert`~~'), 'Should mark Convert as disabled with strike-through');
+test('should show convert action for CSS class names (Option 2: convert-at-definition)', () => {
+		const markdown = new vscode.MarkdownString();
+		const overrides = {
+			'colorbuddy.copyColorAs': {
+				args: [{
+					value: 'rgb(255, 0, 0)',
+					format: 'rgb',
+					source: 'hover'
+				}]
+			}
+		};
+		
+		appendQuickActions(markdown, { surface: 'hover', overrides });
+		const content = markdown.value;
+		
+		assert.ok(content.includes('Copy'), 'Should include Copy action');
+		assert.ok(content.includes('Convert'), 'Should include Convert action');
+		assert.ok(!content.includes('~~`Convert`~~'), 'Convert should NOT be disabled (Option 2 support)');
+		assert.ok(content.includes('[`Convert`]'), 'Convert should be clickable link');
 		});
 		
 		test('should include all actions when all overrides provided', () => {
