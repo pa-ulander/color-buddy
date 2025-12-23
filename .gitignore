@@ -1,6 +1,5 @@
-.github/*.md
-!.github/backlog.md
-!.github/worklog.md
+.github/worklog.md
+.github/backlog.md
 .vscode-test/*
 !img
 dist
