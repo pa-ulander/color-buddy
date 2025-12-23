@@ -149,7 +149,7 @@ suite('Default language integration coverage', () => {
 			assert.ok(value.includes('Color Preview'), `hover should include heading for ${language}`);
 			assert.ok(value.includes('command:colorbuddy.copyColorAs?'), `hover should expose copy command links for ${language}`);
 			assert.ok(value.includes('$(clippy)'), `hover should use copy icon affordance for ${language}`);
-			assert.ok(value.includes(t(LocalizedStrings.TOOLTIP_COLOR_NAME)), `hover should include color name metadata for ${language}`);
+			assert.ok(value.includes(t(LocalizedStrings.TOOLTIP_COLOR_VALUE)), `hover should include color value metadata for ${language}`);
 			assert.ok(value.includes(t(LocalizedStrings.TOOLTIP_BRIGHTNESS)), `hover should include brightness metadata for ${language}`);
 			assert.ok(value.includes(t(LocalizedStrings.TOOLTIP_WCAG_STATUS)), `hover should include WCAG status heading for ${language}`);
 			assert.ok(value.includes('#22c55e') || value.includes('#ef4444'), `hover should include colored pass/fail icons for ${language}`);
