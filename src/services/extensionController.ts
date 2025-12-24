@@ -788,7 +788,7 @@ export class ExtensionController implements vscode.Disposable {
 					editor.selection = new vscode.Selection(updatedRange.start, updatedRange.end);
 					editor.revealRange(updatedRange, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
 
-					// Refresh the formats panel so the green checkmark reflects the latest replacement
+					// Update panel data model (needed for checkmark logic)
 					const updatedPreview = editor.document.lineAt(updatedRange.start.line).text.trim();
 					const lastData = this.accessibilityViewProvider.getLastRenderedData();
 					const insights = getColorInsights(parsed.vscodeColor);
@@ -832,7 +832,11 @@ export class ExtensionController implements vscode.Disposable {
 						usageMatches: updatedMatches
 					};
 
+					// Update panel with new data (includes visual-only update for smooth UX)
 					this.accessibilityViewProvider.updateReport(panelData, 'formats');
+					
+					// Also send visual-only update message for smooth transition
+					this.accessibilityViewProvider.updateCurrentFormat(payload.format);
 				}
 			} else {
 				await this.performColorConversion(editor, range, parsed.vscodeColor, parsed.formatPriority[0]);
