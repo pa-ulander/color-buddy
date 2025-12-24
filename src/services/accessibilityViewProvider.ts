@@ -47,6 +47,7 @@ export type AccessibilityPanelSection = 'summary' | 'contrast' | 'contexts' | 'f
 export interface AccessibilityReportPresenter extends vscode.WebviewViewProvider {
 	readonly viewId: string;
 	updateReport(data: AccessibilityViewData, section?: AccessibilityPanelSection): void;
+	updateCurrentFormat(format: string): void;
 	reveal(preserveFocus?: boolean): void;
 	revealSection(section: AccessibilityPanelSection, preserveFocus?: boolean): void;
 	getSectionProviders(): AccessibilitySectionProvider[];
@@ -123,6 +124,13 @@ export class AccessibilityViewProvider implements AccessibilityReportPresenter {
 		return this.lastRenderedData?.usageMatches;
 	}
 
+	/**
+	 * Update current format visually in formats panel without re-rendering
+	 */
+	updateCurrentFormat(format: string): void {
+		this.providers.formats.updateCurrentFormat(format);
+	}
+
 	reveal(preserveFocus?: boolean): void {
 		this.revealSection('summary', preserveFocus);
 	}
@@ -158,6 +166,15 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 		this.pendingData = data;
 		if (this.view) {
 			this.render(this.view, data);
+		}
+	}
+
+	/**
+	 * Update just the current format visual state without re-rendering (smooth, no flashing)
+	 */
+	updateCurrentFormat(format: string): void {
+		if (this.view) {
+			this.view.webview.postMessage({ type: 'updateCurrentFormat', format });
 		}
 	}
 
@@ -976,7 +993,7 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 				const checkmark = isCurrent ? `<span class="cb-format-check">✓</span>` : `<span class="cb-format-check" style="visibility: hidden;">✓</span>`;
 				
 				return `
-					<li class="cb-format-item ${isCurrent ? 'cb-current' : ''}" style="display: flex; align-items: center; padding: 4px 0; font-size: 0.9em; list-style: none;">
+					<li class="cb-format-item ${isCurrent ? 'cb-current' : ''}" data-format="${this.escapeHtml(conversion.format)}" style="display: flex; align-items: center; padding: 4px 0; font-size: 0.9em; list-style: none;">
 						${checkmark}
 						<div style="flex: 1; margin-left: 0.5rem;">
 							<strong style="margin-right: 0.5em;">${this.escapeHtml(label)}:</strong>
