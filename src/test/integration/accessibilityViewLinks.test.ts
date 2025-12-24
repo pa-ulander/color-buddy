@@ -216,4 +216,45 @@ suite('Accessibility View Links', () => {
 		assert.ok(html.includes('line 3'), 'Should show line 3 text');
 		assert.ok(html.includes('line 45'), 'Should show line 45 text');
 	});
+
+	test('formats panel hides non-convertible usage matches', () => {
+		const formatsProvider = provider.getSectionProviders().find((p: any) => p.section === 'formats');
+		const convertibleMatch = {
+			uri: vscode.Uri.file('/workspace/app.css'),
+			range: new vscode.Range(new vscode.Position(0, 7), new vscode.Position(0, 14)),
+			previewText: 'color: #ff0000;',
+			relativePath: 'app.css',
+			isConvertible: true
+		};
+		const nonConvertibleMatch = {
+			uri: vscode.Uri.file('/workspace/app.module.css'),
+			range: new vscode.Range(new vscode.Position(1, 10), new vscode.Position(1, 21)),
+			previewText: 'class="bg-primary"',
+			relativePath: 'app.module.css',
+			matchText: 'bg-primary',
+			isConvertible: false
+		};
+
+		const data: AccessibilityViewData = {
+			label: 'red',
+			normalizedColor: '#ff0000',
+			colorName: 'Red',
+			colorHex: '#ff0000',
+			brightness: 50,
+			report: { samples: [] },
+			conversions: [
+				{ format: 'hex', value: '#ff0000' },
+				{ format: 'rgb', value: 'rgb(255, 0, 0)' }
+			],
+			usageCount: 2,
+			usageMatches: [convertibleMatch as any, nonConvertibleMatch as any],
+			searchValue: 'red'
+		};
+
+		const html = (formatsProvider as any).renderUsageMatchesWithConversions(data);
+
+		assert.ok(html.includes('app.css'), 'Convertible match should be rendered');
+		assert.ok(!html.includes('app.module.css'), 'Non-convertible match should be filtered out');
+		assert.ok(!html.includes('bg-primary'), 'Should not show CSS class selector text');
+	});
 });

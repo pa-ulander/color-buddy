@@ -10,25 +10,36 @@ import type { ColorData, CSSVariableDeclaration, CSSClassColorDeclaration, Parse
  */
 export function createMockDocument(content: string, languageId = 'css', uri?: vscode.Uri): vscode.TextDocument {
     const mockUri = uri || vscode.Uri.parse(`untitled:test-${Date.now()}.${languageId}`);
-    
-    return {
+    let text = content;
+    let version = 1;
+
+    const getLines = () => text.split('\n');
+
+    const doc: Partial<vscode.TextDocument> & { __updateText?: (next: string) => void } = {
         uri: mockUri,
         fileName: mockUri.fsPath,
         isUntitled: true,
         languageId,
-        version: 1,
+        get version() {
+            return version;
+        },
+        set version(value: number) {
+            version = value;
+        },
         isDirty: false,
         isClosed: false,
         eol: vscode.EndOfLine.LF,
-        lineCount: content.split('\n').length,
+        get lineCount() {
+            return getLines().length;
+        },
         encoding: 'utf8',
         
         save: async () => false,
         getText: (range?: vscode.Range) => {
             if (!range) {
-                return content;
+                return text;
             }
-            const lines = content.split('\n');
+            const lines = getLines();
             if (range.start.line === range.end.line) {
                 return lines[range.start.line].substring(range.start.character, range.end.character);
             }
@@ -42,19 +53,19 @@ export function createMockDocument(content: string, languageId = 'css', uri?: vs
         validatePosition: (position: vscode.Position) => position,
         lineAt: (line: number | vscode.Position) => {
             const lineNumber = typeof line === 'number' ? line : line.line;
-            const lines = content.split('\n');
-            const text = lines[lineNumber] || '';
+            const lines = getLines();
+            const lineText = lines[lineNumber] || '';
             return {
                 lineNumber,
-                text,
-                range: new vscode.Range(lineNumber, 0, lineNumber, text.length),
+                text: lineText,
+                range: new vscode.Range(lineNumber, 0, lineNumber, lineText.length),
                 rangeIncludingLineBreak: new vscode.Range(lineNumber, 0, lineNumber + 1, 0),
-                firstNonWhitespaceCharacterIndex: text.search(/\S/),
-                isEmptyOrWhitespace: text.trim().length === 0
+                firstNonWhitespaceCharacterIndex: lineText.search(/\S/),
+                isEmptyOrWhitespace: lineText.trim().length === 0
             };
         },
         offsetAt: (position: vscode.Position) => {
-            const lines = content.split('\n');
+            const lines = getLines();
             let offset = 0;
             for (let i = 0; i < position.line && i < lines.length; i++) {
                 offset += lines[i].length + 1; // +1 for newline
@@ -63,7 +74,7 @@ export function createMockDocument(content: string, languageId = 'css', uri?: vs
             return offset;
         },
         positionAt: (offset: number) => {
-            const lines = content.split('\n');
+            const lines = getLines();
             let currentOffset = 0;
             for (let line = 0; line < lines.length; line++) {
                 const lineLength = lines[line].length + 1; // +1 for newline
@@ -72,9 +83,16 @@ export function createMockDocument(content: string, languageId = 'css', uri?: vs
                 }
                 currentOffset += lineLength;
             }
-            return new vscode.Position(lines.length - 1, lines[lines.length - 1].length);
+            const lastLine = lines[lines.length - 1] || '';
+            return new vscode.Position(lines.length - 1, lastLine.length);
+        },
+        __updateText: (next: string) => {
+            text = next;
+            version += 1;
         }
-    } as vscode.TextDocument;
+    };
+
+    return doc as vscode.TextDocument;
 }
 
 /**

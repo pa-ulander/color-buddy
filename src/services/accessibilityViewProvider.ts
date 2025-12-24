@@ -38,6 +38,8 @@ export interface AccessibilityUsageMatch {
 	range: vscode.Range;
 	previewText: string;
 	relativePath: string;
+	matchText?: string;
+	isConvertible?: boolean;
 }
 
 export type AccessibilityPanelSection = 'summary' | 'contrast' | 'contexts' | 'formats';
@@ -49,6 +51,7 @@ export interface AccessibilityReportPresenter extends vscode.WebviewViewProvider
 	revealSection(section: AccessibilityPanelSection, preserveFocus?: boolean): void;
 	getSectionProviders(): AccessibilitySectionProvider[];
 	getLastRenderedData(): AccessibilityViewData | null;
+	getCurrentUsageMatches(): AccessibilityUsageMatch[] | undefined;
 }
 
 const PANEL_STYLE_FILES = ['reset.css', 'vscode.css'] as const;
@@ -114,6 +117,10 @@ export class AccessibilityViewProvider implements AccessibilityReportPresenter {
 
 	getLastRenderedData(): AccessibilityViewData | null {
 		return this.lastRenderedData;
+	}
+
+	getCurrentUsageMatches(): AccessibilityUsageMatch[] | undefined {
+		return this.lastRenderedData?.usageMatches;
 	}
 
 	reveal(preserveFocus?: boolean): void {
@@ -454,7 +461,7 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 
 		infoItems.push(`
 			<div>
-				<p style="margin-bottom: 0.25rem; color: var(--vscode-descriptionForeground); font-size: 0.85rem;">${this.escapeHtml(t(LocalizedStrings.TOOLTIP_COLOR_NAME))}</p>
+				<p style="margin-bottom: 0.25rem; color: var(--vscode-descriptionForeground); font-size: 0.85rem;">${this.escapeHtml(t(LocalizedStrings.TOOLTIP_COLOR))}</p>
 				<p><strong>${this.escapeHtml(data.colorName)}</strong> <code>${this.escapeHtml(data.colorHex)}</code></p>
 			</div>
 		`);
@@ -484,8 +491,11 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 				// Inline swatch matching tooltip style
 				const swatchStyle = `width: 10px; height: 10px; border-radius: 2px; background: ${this.escapeHtml(cssColor)}; border: 1px solid white; display: inline-block; vertical-align: middle; margin-right: 0.5rem;`;
 				
-				// Create clickable link to file location
-				const fileLink = `${context.uri.toString()}#L${context.line + 1}`;
+				// Create clickable link to file location using command:vscode.open (works in webviews)
+				const uriWithFragment = `${context.uri.toString()}#${context.line + 1}`;
+				const args = [uriWithFragment];
+				const encodedArgs = encodeURIComponent(JSON.stringify(args));
+				const commandUri = `command:vscode.open?${encodedArgs}`;
 				
 				parts.push(`
 					<p style="margin: 0.5rem 0;">
@@ -493,7 +503,7 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 						<strong>${this.escapeHtml(context.label)}:</strong> <code>${this.escapeHtml(context.resolvedValue)}</code>
 					</p>
 					<p style="font-size: 0.85rem; color: var(--vscode-descriptionForeground); margin: 0 0 0.5rem 1.5rem;">
-						${this.escapeHtml(t(LocalizedStrings.TOOLTIP_DEFINED_IN))} <a href="${fileLink}" style="color: var(--vscode-textLink-foreground); text-decoration: none;">${this.escapeHtml(context.location)}</a>
+						${this.escapeHtml(t(LocalizedStrings.TOOLTIP_DEFINED_IN))} <a href="${commandUri}" style="color: var(--vscode-textLink-foreground); text-decoration: none;">${this.escapeHtml(context.location)}</a>
 					</p>
 				`);
 			}
@@ -627,7 +637,7 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 				</header>
 				<div class="cb-summary-grid">
 					<div>
-						<p>${this.escapeHtml(t(LocalizedStrings.TOOLTIP_COLOR_NAME))}</p>
+						<p>${this.escapeHtml(t(LocalizedStrings.TOOLTIP_COLOR))}</p>
 						<p><strong>${this.escapeHtml(data.colorName)}</strong> <code>${this.escapeHtml(data.colorHex)}</code></p>
 					</div>
 					<div>
@@ -750,7 +760,7 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 	}
 
 	private renderUsageMatches(data: AccessibilityViewData, options?: SectionRenderOptions): string {
-		const matches = data.usageMatches ?? [];
+		const matches = (data.usageMatches ?? []).filter(match => match.isConvertible !== false);
 		const isSearching = data.colorName && data.colorName.includes('Searching');
 		const formatVariations = data.conversions || [];
 		
@@ -847,71 +857,170 @@ export class AccessibilitySectionProvider implements vscode.WebviewViewProvider 
 			return options?.embed ? '' : this.renderEmptyState(t(LocalizedStrings.ACCESSIBILITY_VIEW_EMPTY_FORMATS));
 		}
 
-		const currentValue = data.currentFormatValue;
-		
-		// Only render convert icons for literal colors (not CSS variables/classes)
-		// References can be copied but not directly converted
-		const isReference = data.cssVariableName || data.tailwindClass || data.cssClassName;
-		const hasEditorContext = data.editorUri && data.editorRange && !isReference;
-		
-		const listItems = data.conversions.map(conversion => {
-			const isCurrent = conversion.value === currentValue;
-			const label = this.getFormatLabel(conversion.format);
+		// Only render usage matches section with conversion boxes for each match
+		const shouldRenderUsages = (data.usageMatches && data.usageMatches.length > 0) || (data.colorName?.includes('Searching') && data.searchValue);
+		return shouldRenderUsages ? this.renderUsageMatchesWithConversions(data, { embed: true }) : '';
+	}
+
+	private renderUsageMatchesWithConversions(data: AccessibilityViewData, _options?: { embed?: boolean }): string {
+		const matches = (data.usageMatches || []).filter(match => match.isConvertible !== false);
+		const isSearching = data.colorName?.includes('Searching');
+		const searchValue = data.searchValue || data.label;
+		const formatVariations = data.conversions || [];
+
+		// Progress section when search is active
+		const progressSection = isSearching ? `
+			<div style="padding: 12px; background: var(--vscode-editor-background); border-radius: 4px; margin-bottom: 12px;">
+				<div style="height: 4px; background: var(--vscode-progressBar-background); border-radius: 2px; overflow: hidden; position: relative;">
+					<div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: var(--vscode-progressBar-background); animation: cb-progress 2s ease-in-out infinite;"></div>
+				</div>
+				<p style="margin: 0; font-size: 0.9em; color: var(--vscode-descriptionForeground);">
+					Looking for ${formatVariations.length} format variation${formatVariations.length !== 1 ? 's' : ''}
+					${matches.length > 0 ? ` • Found ${matches.length} match${matches.length !== 1 ? 'es' : ''} so far` : ''}
+				</p>
+				${formatVariations.length > 0 && formatVariations.length <= 5 ? `
+					<details style="margin-top: 8px;">
+						<summary style="cursor: pointer; font-size: 0.9em; color: var(--vscode-descriptionForeground);">Show formats</summary>
+						<ul style="margin: 4px 0 0 0; padding-left: 20px; font-size: 0.85em; color: var(--vscode-descriptionForeground);">
+							${formatVariations.slice(0, 10).map(f => `<li><code>${this.escapeHtml(f.value)}</code></li>`).join('')}
+						</ul>
+					</details>
+				` : ''}
+			</div>
+			<style>
+				@keyframes cb-progress {
+					0% { transform: translateX(-100%); }
+					50% { transform: translateX(100%); }
+					100% { transform: translateX(-100%); }
+				}
+			</style>
+		` : '';
+
+		const resultsText = isSearching 
+			? `${matches.length} found so far...` 
+			: `${matches.length} result${matches.length !== 1 ? 's' : ''}`;
+
+		// Render each match as its own conversion box
+		const matchBoxes = matches.map(match => {
+			const fileName = match.relativePath || match.uri.fsPath.split('/').pop() || 'file';
+			const lineNumber = match.range.start.line + 1;
 			
-			// Build payload for convert command - converts the original color in the editor
-			// Only create convert payload if we have valid editor context
-			let convertIcon = '';
-			if (hasEditorContext) {
-				const convertPayload = {
-					uri: data.editorUri!,
-					range: {
-						start: { line: data.editorRange!.start.line, character: data.editorRange!.start.character },
-						end: { line: data.editorRange!.end.line, character: data.editorRange!.end.character }
-					},
-					normalizedColor: data.normalizedColor,
-					originalText: data.currentFormatValue,
-					format: conversion.format,
-					source: 'panel' as const
-					};
-				const convertEncodedPayload = encodeURIComponent(JSON.stringify(convertPayload));
-				const convertCommandUri = `command:colorbuddy.convertColorFormat?${convertEncodedPayload}`;
-				convertIcon = `<a href="${convertCommandUri}" class="cb-convert-icon" title="Convert to ${this.escapeHtml(label)}" style="color: var(--vscode-textLink-foreground); text-decoration: none; cursor: pointer;"><i class="codicon codicon-symbol-color"></i></a>`;
+			// Extract the current color value from the preview text
+			// The previewText contains the line with the color, we need to find which format it matches
+			const currentColorText = match.previewText.trim();
+			
+			// Find which format is actually at this location by looking for exact matches
+			// We need to find the LONGEST match to avoid substring issues (e.g., TAILWIND inside HSL)
+			let currentFormat: string | null = null;
+			let longestMatch = '';
+			
+			for (const conv of formatVariations) {
+				const normalized = (str: string) => str.trim().toLowerCase().replace(/\s+/g, '');
+				const convNormalized = normalized(conv.value);
+				const textNormalized = normalized(currentColorText);
+				
+				// Check for exact word boundary match (not just substring)
+				if (textNormalized.includes(convNormalized) && convNormalized.length > longestMatch.length) {
+					// Verify it's not just a substring of another format
+					// e.g., "210 40% 96.08%" shouldn't match if we have "hsl(210 40% 96.08%)"
+					const beforeChar = textNormalized.indexOf(convNormalized) > 0 
+						? currentColorText[textNormalized.indexOf(convNormalized) - 1] 
+						: ' ';
+					const afterIdx = textNormalized.indexOf(convNormalized) + convNormalized.length;
+					const afterChar = afterIdx < textNormalized.length 
+						? textNormalized[afterIdx] 
+						: ' ';
+					
+					// Accept if it's not surrounded by alphanumeric chars (i.e., it's a complete token)
+					if (!/[a-z0-9]/.test(beforeChar) && !/[a-z0-9]/.test(afterChar)) {
+						longestMatch = convNormalized;
+						currentFormat = conv.format;
+					}
+				}
 			}
 			
-			// Also keep copy functionality
-			const copyPayload = {
-				value: conversion.value,
-				format: conversion.format,
-				label: label
-			};
-			const copyEncodedPayload = encodeURIComponent(JSON.stringify(copyPayload));
-			const copyCommandUri = `command:colorbuddy.copyColorAs?${copyEncodedPayload}`;
-			const copyIcon = `<a href="${copyCommandUri}" class="cb-copy-icon" title="Copy to clipboard" style="margin-left: 0.5rem; opacity: 0.7; cursor: pointer;"><i class="codicon codicon-copy"></i></a>`;
+			// Build conversion list for this specific match
+			const conversionItems = formatVariations.map(conversion => {
+				const label = this.getFormatLabel(conversion.format);
+				
+				// Check if this conversion format is the current one at this location
+				const isCurrent = conversion.format === currentFormat;
+				
+				// Build convert payload for this specific match location
+				const convertPayload = {
+					uri: match.uri.toString(),
+					range: {
+						start: { line: match.range.start.line, character: match.range.start.character },
+						end: { line: match.range.end.line, character: match.range.end.character }
+					},
+					normalizedColor: data.normalizedColor,
+					originalText: match.previewText.trim(),
+					format: conversion.format,
+					source: 'panel' as const
+				};
+				const convertEncodedPayload = encodeURIComponent(JSON.stringify(convertPayload));
+				const convertCommandUri = `command:colorbuddy.convertColorFormat?${convertEncodedPayload}`;
+				const convertIcon = `<a href="${convertCommandUri}" class="cb-convert-icon" title="Convert to ${this.escapeHtml(label)}" style="color: var(--vscode-textLink-foreground); text-decoration: none; cursor: pointer; margin-right: 0.5rem;"><i class="codicon codicon-symbol-color"></i></a>`;
+				
+				// Copy functionality
+				const copyPayload = {
+					value: conversion.value,
+					format: conversion.format,
+					label: label
+				};
+				const copyEncodedPayload = encodeURIComponent(JSON.stringify(copyPayload));
+				const copyCommandUri = `command:colorbuddy.copyColorAs?${copyEncodedPayload}`;
+				const copyIcon = `<a href="${copyCommandUri}" class="cb-copy-icon" title="Copy to clipboard" style="opacity: 0.7; cursor: pointer;"><i class="codicon codicon-copy"></i></a>`;
+				
+				// Show green checkmark for current format
+				const checkmark = isCurrent ? `<span class="cb-format-check">✓</span>` : `<span class="cb-format-check" style="visibility: hidden;">✓</span>`;
+				
+				return `
+					<li class="cb-format-item ${isCurrent ? 'cb-current' : ''}" style="display: flex; align-items: center; padding: 4px 0; font-size: 0.9em; list-style: none;">
+						${checkmark}
+						<div style="flex: 1; margin-left: 0.5rem;">
+							<strong style="margin-right: 0.5em;">${this.escapeHtml(label)}:</strong>
+							<code style="background: var(--vscode-textCodeBlock-background); padding: 2px 4px; border-radius: 3px;">${this.escapeHtml(conversion.value)}</code>
+						</div>
+						${convertIcon}${copyIcon}
+					</li>
+				`;
+			}).join('');
 			
-			// Show green checkmark for current format
-			const checkmark = isCurrent ? `<span class="cb-format-check">✓</span>` : `<span class="cb-format-check" style="visibility: hidden;">✓</span>`;
+			// Open file link
+			const openEncodedPayload = encodeURIComponent(JSON.stringify([match.uri, { selection: match.range }]));
+			const openCommandUri = `command:vscode.open?${openEncodedPayload}`;
 			
-			return `<li class="cb-format-item ${isCurrent ? 'cb-current' : ''}">
-				${checkmark}
-				<div style="flex: 1;">
-					<strong>${this.escapeHtml(label)}:</strong> 
-					<code>${this.escapeHtml(conversion.value)}</code>
-				</div>
-				${convertIcon}${copyIcon}
-			</li>`;
+			return `
+				<details class="cb-usage-box" open style="margin-bottom: 12px; border: 1px solid var(--vscode-panel-border); border-radius: 4px; padding: 8px;">
+					<summary style="cursor: pointer; font-weight: 500; margin-bottom: 8px;">
+						<a href="${openCommandUri}" style="color: var(--vscode-textLink-foreground); text-decoration: none;">
+							${this.escapeHtml(fileName)}:${lineNumber}
+						</a>
+					</summary>
+					<div style="padding-left: 12px; border-left: 2px solid var(--vscode-textLink-foreground); margin-left: 4px;">
+						<code style="display: block; margin-bottom: 8px; font-size: 0.85em; color: var(--vscode-descriptionForeground);">${this.escapeHtml(match.previewText)}</code>
+						<ul class="cb-list cb-format-list" style="margin: 0; padding: 0;">
+							${conversionItems}
+						</ul>
+					</div>
+				</details>
+			`;
 		}).join('');
 
 		const card = `
 			<section class="cb-card">
 				<header class="cb-section-header">
 					<div>
-						<p class="cb-eyebrow">Converting</p>
-						<h3><code>${this.escapeHtml(data.currentFormatValue || data.label)}</code></h3>
+						<p class="cb-eyebrow">Find Usages</p>
+						<h4>Results for: ${this.escapeHtml(searchValue)}</h4>
+					</div>
+					<div class="cb-toolbar-meta">
+						<span>${resultsText}</span>
 					</div>
 				</header>
-				<ul class="cb-list cb-format-list">
-					${listItems}
-				</ul>
+				${progressSection}
+				${matchBoxes}
 			</section>
 		`;
 		return card;

@@ -45,7 +45,8 @@ import {
 	AccessibilityViewProvider,
 	type AccessibilityReportPresenter,
 	type AccessibilityViewData,
-	type AccessibilityVariableContext
+	type AccessibilityVariableContext,
+	type AccessibilityUsageMatch
 } from './accessibilityViewProvider';
 
 const CSS_LIKE_LANGUAGES = new Set([
@@ -735,18 +736,23 @@ export class ExtensionController implements vscode.Disposable {
 		try {
 			const uri = vscode.Uri.parse(payload.uri);
 			let editor = vscode.window.visibleTextEditors.find(ed => ed.document.uri.toString() === uri.toString());
+			
+			const start = new vscode.Position(payload.range.start.line, payload.range.start.character);
+			const end = new vscode.Position(payload.range.end.line, payload.range.end.character);
+			const range = new vscode.Range(start, end);
+			
 			if (!editor) {
 				const document = await vscode.workspace.openTextDocument(uri);
-				editor = await vscode.window.showTextDocument(document, { preview: false });
+				// Open document with selection at the target range
+				editor = await vscode.window.showTextDocument(document, { 
+					preview: false,
+					selection: range
+				});
 			}
 
 			if (!editor) {
 				return true;
 			}
-
-			const start = new vscode.Position(payload.range.start.line, payload.range.start.character);
-			const end = new vscode.Position(payload.range.end.line, payload.range.end.character);
-			const range = new vscode.Range(start, end);
 			
 			// Validate range is within document bounds
 			if (start.line >= editor.document.lineCount || end.line >= editor.document.lineCount) {
@@ -761,47 +767,72 @@ export class ExtensionController implements vscode.Disposable {
 				return true;
 			}
 
-			// Option 2: Check if this is a CSS variable/class reference and convert at definition
-			if (payload.source === 'panel' && payload.format && payload.originalText) {
-				const isReference = payload.originalText.includes('var(--') || 
-				                   payload.originalText.startsWith('--') ||
-				                   this.looksLikeTailwindClass(payload.originalText);
-				
-				if (isReference) {
-					// Get ColorData to identify the reference type
-					const colorData = await this.ensureColorData(editor.document);
-					const matchingData = colorData.find(cd => 
-						cd.range.start.line === range.start.line &&
-						cd.range.start.character === range.start.character
-					);
-					
-					if (matchingData && (matchingData.isCssVariable || matchingData.isTailwindClass || matchingData.isCssClass)) {
-						return await this.handleConvertAtDefinition(matchingData, payload.format);
-					}
-				}
-			}
-
 			// If source is 'panel', do the conversion directly (user clicked a format in the panel)
+			// NO QuickPicks, NO dialogs - just silent replacement at the exact location
 			// Otherwise, show the formats panel (user clicked Convert quick action)
 			if (payload.source === 'panel' && payload.format) {
 				const formatted = this.colorFormatter.formatByFormat(parsed.vscodeColor, payload.format);
 				if (formatted) {
-					const success = await editor.edit(editBuilder => {
-						editBuilder.replace(range, formatted);
+					const existingText = editor.document.getText(range);
+					const hasTrailingSemicolon = existingText.trimEnd().endsWith(';');
+					const formattedWithSemicolon = hasTrailingSemicolon && !formatted.trimEnd().endsWith(';')
+						? `${formatted};`
+						: formatted;
+
+					await editor.edit(editBuilder => {
+						editBuilder.replace(range, formattedWithSemicolon);
 					});
-					
-					if (success) {
-						// Calculate new range after replacement (text length may have changed)
-						const newEndCharacter = range.start.character + formatted.length;
-						const newRange = new vscode.Range(
-							range.start,
-							new vscode.Position(range.start.line, newEndCharacter)
-						);
-						
-						// Update formats panel with new range and current format
-						// This allows subsequent conversions to replace the correct text
-						await this.performColorConversion(editor, newRange, parsed.vscodeColor, payload.format);
-					}
+
+					// Update selection/highlight to the new value
+					const updatedRange = new vscode.Range(range.start, range.start.translate(0, formattedWithSemicolon.length));
+					editor.selection = new vscode.Selection(updatedRange.start, updatedRange.end);
+					editor.revealRange(updatedRange, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+
+					// Refresh the formats panel so the green checkmark reflects the latest replacement
+					const updatedPreview = editor.document.lineAt(updatedRange.start.line).text.trim();
+					const lastData = this.accessibilityViewProvider.getLastRenderedData();
+					const insights = getColorInsights(parsed.vscodeColor);
+					const conversions = collectFormatConversions(this.colorParser, this.colorFormatter, parsed.vscodeColor, payload.format);
+					const updatedMatches = (lastData?.usageMatches && lastData.usageMatches.length > 0)
+						? lastData.usageMatches.map(match => {
+							const sameLocation = match.uri.toString() === uri.toString()
+								&& match.range.start.line === range.start.line
+								&& match.range.start.character === range.start.character;
+							return sameLocation
+								? {
+									...match,
+									range: new vscode.Range(
+										match.range.start,
+										match.range.start.translate(0, match.matchText?.length ?? match.range.end.character - match.range.start.character)
+									),
+									previewText: updatedPreview,
+									matchText: formattedWithSemicolon
+								}
+								: match;
+						})
+						: [{
+							uri,
+							range: updatedRange,
+							previewText: updatedPreview,
+							matchText: formattedWithSemicolon,
+							relativePath: vscode.workspace.asRelativePath(uri, false)
+						}];
+
+					const panelData: AccessibilityViewData = {
+						label: payload.originalText ?? formattedWithSemicolon,
+						normalizedColor: insights.hex,
+						colorName: insights.name,
+						colorHex: insights.hex,
+						brightness: insights.brightness,
+						report: { samples: [] } as any,
+						conversions,
+						currentFormatValue: formattedWithSemicolon,
+						editorRange: updatedRange,
+						editorUri: uri.toString(),
+						usageMatches: updatedMatches
+					};
+
+					this.accessibilityViewProvider.updateReport(panelData, 'formats');
 				}
 			} else {
 				await this.performColorConversion(editor, range, parsed.vscodeColor, parsed.formatPriority[0]);
@@ -817,6 +848,7 @@ export class ExtensionController implements vscode.Disposable {
 	/**
 	 * Helper to detect if text looks like a Tailwind class
 	 */
+	// @ts-ignore - keeping for potential future use
 	private looksLikeTailwindClass(text: string): boolean {
 		// Simple heuristic: bg-, text-, border- prefixes without parentheses
 		return /^(bg|text|border)-[\w-]+$/.test(text) && !text.includes('(');
@@ -837,6 +869,60 @@ export class ExtensionController implements vscode.Disposable {
 		const currentValue = editor.document.getText(range);
 		const insights = getColorInsights(color);
 		
+		// Get full color data from document to get all color properties (CSS variable, Tailwind class, etc.)
+		const fullColorData = await this.ensureColorData(editor.document);
+		const colorDataAtCursor = fullColorData.find(cd => 
+			cd.range.start.line === range.start.line &&
+			cd.range.start.character === range.start.character
+		);
+		
+		// Build search candidates with all properties if we found the color data
+		const colorData: ColorData = colorDataAtCursor || {
+			range,
+			originalText: currentValue,
+			normalizedColor: insights.hex,
+			vscodeColor: color,
+			format: format || 'hex'
+		};
+		
+		const searchCandidates = this.getColorSearchCandidates(colorData);
+		let usageMatches: AccessibilityUsageMatch[] = [];
+		
+		if (searchCandidates.length > 0) {
+			const allMatches = await this.searchMultipleFormats(searchCandidates, currentValue);
+			// Cache opened documents per URI to avoid repeated reads
+			const docCache = new Map<string, vscode.TextDocument>();
+			const getDoc = async (uri: vscode.Uri) => {
+				const key = uri.toString();
+				if (docCache.has(key)) return docCache.get(key)!;
+				const doc = await vscode.workspace.openTextDocument(uri);
+				docCache.set(key, doc);
+				return doc;
+			};
+			
+			usageMatches = [];
+			for (const match of allMatches) {
+				let matchText = '';
+				let isConvertible = false;
+				try {
+					const doc = await getDoc(match.uri);
+					matchText = doc.getText(match.range);
+					isConvertible = !!this.colorParser.parseColor(matchText);
+				} catch (err) {
+					// If we can't read the text, default to non-convertible
+					isConvertible = false;
+				}
+				usageMatches.push({
+					uri: match.uri,
+					range: match.range,
+					previewText: match.previewText,
+					relativePath: vscode.workspace.asRelativePath(match.uri, false),
+					matchText,
+					isConvertible
+				});
+			}
+		}
+		
 		// Create data for the formats panel
 		const data: AccessibilityViewData = {
 			label: currentValue,
@@ -848,10 +934,11 @@ export class ExtensionController implements vscode.Disposable {
 			conversions,
 			currentFormatValue: currentValue,
 			editorRange: range,
-			editorUri: editor.document.uri.toString()
+			editorUri: editor.document.uri.toString(),
+			usageMatches
 		};
 
-		// Update formats panel with conversion options
+		// Update formats panel with conversion options and usage matches
 		this.accessibilityViewProvider.updateReport(data, 'formats');
 		this.accessibilityViewProvider.revealSection('formats', true);
 	}
@@ -860,6 +947,9 @@ export class ExtensionController implements vscode.Disposable {
 	 * Handle convert-at-definition for CSS variables, Tailwind classes, and CSS classes.
 	 * This is Option 2: navigate to the definition and convert the actual color value.
 	 */
+	// DISABLED: Convert-at-definition causes QuickPick dialogs
+	// User wants silent replacement at exact location only
+	// @ts-ignore - keeping method for potential future use
 	private async handleConvertAtDefinition(
 		colorData: ColorData,
 		targetFormat: ColorFormat
@@ -1982,7 +2072,7 @@ export class ExtensionController implements vscode.Disposable {
 		markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_COLOR)}:** \`${primaryValue}\`\n\n`);
 		markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_NORMALIZED)}:** \`${data.normalizedColor}\`\n\n`);
 		const insights = getColorInsights(data.vscodeColor);
-		markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_COLOR_NAME)}:** ${insights.name} (\`${insights.hex}\`)\n\n`);
+		markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_COLOR_VALUE)}:** ${insights.name} (\`${insights.hex}\`)\n\n`);
 		markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_BRIGHTNESS)}:** ${insights.brightness}%\n\n`);
 		markdown.appendMarkdown(`**${t(LocalizedStrings.STATUS_BAR_USAGE_COUNT)}:** ${metrics.usageCount}\n\n`);
 		this.appendCssVariableContexts(markdown, data);
