@@ -803,7 +803,7 @@ export class ExtensionController implements vscode.Disposable {
 									...match,
 									range: new vscode.Range(
 										match.range.start,
-										match.range.start.translate(0, match.matchText?.length ?? match.range.end.character - match.range.start.character)
+										match.range.start.translate(0, formattedWithSemicolon.length)
 									),
 									previewText: updatedPreview,
 									matchText: formattedWithSemicolon
