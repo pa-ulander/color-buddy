@@ -793,6 +793,8 @@ export class ExtensionController implements vscode.Disposable {
 					const lastData = this.accessibilityViewProvider.getLastRenderedData();
 					const insights = getColorInsights(parsed.vscodeColor);
 					const conversions = collectFormatConversions(this.colorParser, this.colorFormatter, parsed.vscodeColor, payload.format);
+					
+					// Preserve usage match ranges (stable search results) but update preview text at conversion location
 					const updatedMatches = (lastData?.usageMatches && lastData.usageMatches.length > 0)
 						? lastData.usageMatches.map(match => {
 							const sameLocation = match.uri.toString() === uri.toString()
@@ -801,22 +803,13 @@ export class ExtensionController implements vscode.Disposable {
 							return sameLocation
 								? {
 									...match,
-									range: new vscode.Range(
-										match.range.start,
-										match.range.start.translate(0, formattedWithSemicolon.length)
-									),
+									// Keep original range (for stable display), but update preview to show converted value
 									previewText: updatedPreview,
 									matchText: formattedWithSemicolon
 								}
 								: match;
 						})
-						: [{
-							uri,
-							range: updatedRange,
-							previewText: updatedPreview,
-							matchText: formattedWithSemicolon,
-							relativePath: vscode.workspace.asRelativePath(uri, false)
-						}];
+						: [];
 
 					const panelData: AccessibilityViewData = {
 						label: payload.originalText ?? formattedWithSemicolon,
