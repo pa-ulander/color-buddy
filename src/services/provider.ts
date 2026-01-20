@@ -423,6 +423,8 @@ export class Provider {
                         this.createColorLiteralHover(data, markdown, colorData);
                     }
 
+
+                    
                     return new vscode.Hover(markdown, data.range);
                 }
             }
