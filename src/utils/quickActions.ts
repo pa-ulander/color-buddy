@@ -27,11 +27,20 @@ interface AppendQuickActionsOptions {
 export const EXECUTE_QUICK_ACTION_COMMAND = 'colorbuddy.executeQuickAction';
 
 const QUICK_ACTIONS: QuickAction[] = [
+	// Panel 1: accessibilitySummaryPanel
 	{ command: 'colorbuddy.testColorAccessibility', label: t(LocalizedStrings.COMMAND_QUICK_ACTION_DISPLAY_SUMMARY), args: [{ panel: 'summary' }] },
-	{ command: 'colorbuddy.copyColorAs', label: t(LocalizedStrings.COMMAND_QUICK_ACTION_COPY) },
-	{ command: 'colorbuddy.convertColorFormat', label: t(LocalizedStrings.COMMAND_QUICK_ACTION_CONVERT) },
+	
+	// Panel 2: accessibilityTestResultPanel
 	{ command: 'colorbuddy.testColorAccessibility', label: t(LocalizedStrings.COMMAND_QUICK_ACTION_ACCESSIBILITY), args: [{ panel: 'contrast' }] },
+	
+	// Panel 3: findUsagesPanel
 	{ command: 'colorbuddy.findColorUsages', label: t(LocalizedStrings.COMMAND_QUICK_ACTION_FIND_USAGES) },
+	
+	// Panel 4: formatConversionPanel
+	{ command: 'colorbuddy.testColorAccessibility', label: t(LocalizedStrings.COMMAND_QUICK_ACTION_CONVERT), args: [{ panel: 'formats' }] },
+	
+	// Utility actions (not panel-specific)
+	{ command: 'colorbuddy.copyColorAs', label: t(LocalizedStrings.COMMAND_QUICK_ACTION_COPY) },
 	{ command: 'colorbuddy.showColorPalette', label: t(LocalizedStrings.COMMAND_QUICK_ACTION_PALETTE) }
 ];
 
