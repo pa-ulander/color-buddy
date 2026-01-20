@@ -56,28 +56,28 @@
     "views": {
       "colorbuddy": [
         {
-          "id": "colorbuddy.accessibilitySummary",
+          "id": "colorbuddy.accessibilitySummaryPanel",
           "name": "Accessibility summary",
           "type": "webview",
           "contextualTitle": "ColorBuddy Accessibility Summary",
           "icon": "media/colorbuddy-palette-white6.svg"
         },
         {
-          "id": "colorbuddy.accessibilityContrast",
+          "id": "colorbuddy.accessabilityTestResultPanel",
           "name": "WCAG test results",
           "type": "webview",
           "contextualTitle": "ColorBuddy Accessibility WCAG Checks",
           "icon": "media/colorbuddy-palette-white6.svg"
         },
         {
-          "id": "colorbuddy.accessibilityContexts",
+          "id": "colorbuddy.findUsagesPanel",
           "name": "Find usages",
           "type": "webview",
           "contextualTitle": "ColorBuddy Find Usages",
           "icon": "media/colorbuddy-palette-white6.svg"
         },
         {
-          "id": "colorbuddy.accessibilityFormats",
+          "id": "colorbuddy.formatConversionPanel",
           "name": "Format conversions",
           "type": "webview",
           "contextualTitle": "ColorBuddy Color Format Conversions",
