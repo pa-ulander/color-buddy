@@ -31,6 +31,7 @@ if (FIND_COLOR_USAGE_LINE_INDEX === -1) {
 }
 
 const ACCESSIBILITY_VIEW_COMMAND = 'workbench.view.extension.colorbuddy';
+const ACCESSIBILITY_CONTRAST_FOCUS_COMMAND = 'colorbuddy.accessabilityTestResultPanel.focus';
 
 suite('Command Integration', () => {
 	function createDisposable(): vscode.Disposable {
@@ -1023,6 +1024,29 @@ suite('Command Integration', () => {
 			await (command as (...args: unknown[]) => unknown)({ value: 'rgb(15, 23, 42)' });
 			viewData = getAccessibilityView(env).getLastRenderedData();
 			assert.strictEqual(viewData?.section, 'summary', 'Should default to summary panel when no panel specified');
+		} finally {
+			await env.restore();
+		}
+	});
+
+	test('colorbuddy.testColorAccessibility focuses target panel when webview is unopened', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const command = env.registeredCommands.get('colorbuddy.testColorAccessibility');
+			assert.ok(typeof command === 'function', 'Test color accessibility command missing');
+
+			const executedBefore = env.getExecutedCommands().length;
+			await (command as (...args: unknown[]) => unknown)({ value: 'rgb(15, 23, 42)', panel: 'contrast' });
+
+			const executedCommands = env.getExecutedCommands().slice(executedBefore).map(entry => entry.command);
+			assert.ok(
+				executedCommands.includes(ACCESSIBILITY_VIEW_COMMAND),
+				'Should open ColorBuddy Activity Bar container when running accessibility command'
+			);
+			assert.ok(
+				executedCommands.includes(ACCESSIBILITY_CONTRAST_FOCUS_COMMAND),
+				'Should focus the contrast panel even if it has not been opened yet'
+			);
 		} finally {
 			await env.restore();
 		}
