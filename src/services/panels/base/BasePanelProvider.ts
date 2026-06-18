@@ -55,6 +55,11 @@ export abstract class BasePanelProvider {
 
 		webviewView.webview.html = this.getWebviewHtml(webviewView.webview, this.lastRenderedData);
 
+		// Handle messages from the webview
+		webviewView.webview.onDidReceiveMessage(message => {
+			this.handleMessage(message);
+		});
+
 		// Handle webview visibility changes
 		webviewView.onDidChangeVisibility(() => {
 			if (webviewView.visible && this.lastRenderedData) {
@@ -109,9 +114,9 @@ export abstract class BasePanelProvider {
 			webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', file))
 		);
 
-		// Get codicon font URI - direct reference to font file
-		const codiconFontUri = webview.asWebviewUri(
-			vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.ttf')
+		// Get codicon CSS URI - use the full CSS file from @vscode/codicons package
+		const codiconCssUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.css')
 		);
 
 		return `<!DOCTYPE html>
@@ -121,36 +126,16 @@ export abstract class BasePanelProvider {
 	<!--
 		Use a content security policy to only allow loading specific resources in the webview
 	-->
-	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'none';">
+	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'unsafe-inline';">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>${this.getTitle()}</title>
 	${styleUris.map(uri => `<link rel="stylesheet" href="${uri}">`).join('\n\t')}
-	<style>
-		@font-face {
-			font-family: "codicon";
-			font-display: block;
-			src: url("${codiconFontUri}") format("truetype");
-		}
-		
-		.codicon[class*='codicon-'] {
-			font: normal normal normal 16px/1 codicon;
-			display: inline-block;
-			text-decoration: none;
-			text-rendering: auto;
-			text-align: center;
-			-webkit-font-smoothing: antialiased;
-			-moz-osx-font-smoothing: grayscale;
-			user-select: none;
-			-webkit-user-select: none;
-			-ms-user-select: none;
-		}
-		
-		.codicon.codicon-copy::before { content: "\\ebcc"; }
-	</style>
+	<link href="${codiconCssUri}" rel="stylesheet" />
 	${this.getCustomStyles()}
 </head>
 <body>
 	${this.renderContent(data)}
+	${this.getCustomScripts()}
 </body>
 </html>`;
 	}
@@ -278,7 +263,53 @@ export abstract class BasePanelProvider {
 			50% { transform: translateX(100%); }
 			100% { transform: translateX(-100%); }
 		}
+		
+		/* Form controls */
+		input[type="radio"] {
+			cursor: pointer;
+			margin-right: 8px;
+		}
+		
+		.cb-bulk-button {
+			margin-top: 16px;
+			padding: 8px 16px;
+			background: var(--vscode-button-background);
+			color: var(--vscode-button-foreground);
+			border: none;
+			border-radius: 2px;
+			cursor: pointer;
+			font-size: 13px;
+			width: 100%;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: 8px;
+		}
+		
+		.cb-bulk-button:hover {
+			background: var(--vscode-button-hoverBackground);
+		}
+		
+		.cb-bulk-button:disabled {
+			opacity: 0.5;
+			cursor: not-allowed;
+		}
 	</style>`;
+	}
+
+	/**
+	 * Get custom scripts for this panel.
+	 */
+	protected getCustomScripts(): string {
+		return '';
+	}
+
+	/**
+	 * Handle messages from the webview.
+	 */
+	protected handleMessage(message: any): void {
+		// Default implementation does nothing
+		console.log(`[cb] Panel received message:`, message);
 	}
 
 	/**

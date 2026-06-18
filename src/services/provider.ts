@@ -15,7 +15,6 @@ import type {
 } from '../types';
 import { collectFormatConversions, appendFormatConversionList, FormatConversion } from '../utils/colorFormatConversions';
 import { appendQuickActions } from '../utils/quickActions';
-import { buildConvertColorCommandPayload } from '../utils/commandPayloads';
 import { buildAccessibilityMetadata } from '../utils/accessibilityMetadata';
 import { getColorUsageCount } from '../utils/colorUsage';
 import { getColorInsights } from '../utils/colorInsights';
@@ -156,7 +155,6 @@ export class Provider {
             };
         })();
 
-        const convertPayload = buildConvertColorCommandPayload(data, 'hover');
         const metadata = buildAccessibilityMetadata(data, options?.usageCount);
         const accessibilityPayload: TestAccessibilityCommandPayload | undefined = data.normalizedColor
             ? {
@@ -181,9 +179,6 @@ export class Provider {
         const overrides: Record<string, { args?: unknown[] }> = {};
         if (payload) {
             overrides['colorbuddy.copyColorAs'] = { args: [payload] };
-        }
-        if (convertPayload) {
-            overrides['colorbuddy.convertColorFormat'] = { args: [convertPayload] };
         }
         if (accessibilityPayload) {
             overrides['colorbuddy.testColorAccessibility'] = { args: [accessibilityPayload] };

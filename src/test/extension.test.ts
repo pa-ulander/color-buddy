@@ -301,20 +301,14 @@ suite('Default language literal pipeline', () => {
 			assertDefined(hover, 'expected hover result when building convert payload');
 			const hoverMarkdown = hover!.contents[0] as vscode.MarkdownString;
 			const payloads = extractQuickActionPayloads(hoverMarkdown);
-			const convertPayload = payloads.find(payload => payload.target === 'colorbuddy.convertColorFormat');
+			const convertPayload = payloads.find(payload => payload.target === 'colorbuddy.findColorUsages' && (payload.args?.[0] as any)?.panel === 'formats');
 			assertDefined(convertPayload, 'expected convert quick action payload');
 			assert.ok(Array.isArray(convertPayload!.args), 'expected convert quick action args array');
-			const payloadArg = convertPayload!.args[0];
-			assert.strictEqual(payloadArg.uri, document.uri.toString(), 'convert payload should point to the hovered document');
-			assert.deepStrictEqual(
-				payloadArg.range,
-				{
-					start: { line: literal.range.start.line, character: literal.range.start.character },
-					end: { line: literal.range.end.line, character: literal.range.end.character }
-				},
-				'convert payload should encode the hovered range'
-			);
-			assert.ok(typeof payloadArg.normalizedColor === 'string' && payloadArg.normalizedColor.length > 0, 'convert payload should include normalized color text');
+			const payloadArg = convertPayload!.args![0] as any;
+			assert.strictEqual(payloadArg.value, literal.normalizedColor, 'convert payload should use normalized color value');
+			assert.strictEqual(payloadArg.label, literal.originalText, 'convert payload should use original text as label');
+			assert.strictEqual(payloadArg.source, 'hover', 'convert payload source should be hover');
+			assert.strictEqual(payloadArg.panel, 'formats', 'convert payload should point to formats panel');
 		});
 
 		test('hover copy action uses CSS variable declaration value', async () => {
@@ -507,19 +501,14 @@ suite('Default language literal pipeline', () => {
 				);
 
 				const payloads = extractQuickActionPayloads(tooltip);
-				const convertPayload = payloads.find(payload => payload.target === 'colorbuddy.convertColorFormat');
+				const convertPayload = payloads.find(payload => payload.target === 'colorbuddy.findColorUsages' && (payload.args?.[0] as any)?.panel === 'formats');
 				assertDefined(convertPayload, 'expected status bar convert payload');
-				const payloadArg = convertPayload!.args?.[0];
+				const payloadArg = convertPayload!.args?.[0] as any;
 				assertDefined(payloadArg, 'expected status bar convert payload argument');
-				assert.strictEqual(payloadArg.uri, document.uri.toString(), 'status bar convert payload should reference the document');
-				assert.deepStrictEqual(
-					payloadArg.range,
-					{
-						start: { line: literal.range.start.line, character: literal.range.start.character },
-						end: { line: literal.range.end.line, character: literal.range.end.character }
-					},
-					'convert payload should encode the literal range'
-				);
+				assert.strictEqual(payloadArg.value, literal.normalizedColor, 'status bar convert payload should use normalized color value');
+				assert.strictEqual(payloadArg.label, literal.originalText, 'status bar convert payload should use original text as label');
+				assert.strictEqual(payloadArg.source, 'statusBar', 'status bar convert payload source should be statusBar');
+				assert.strictEqual(payloadArg.panel, 'formats', 'status bar convert payload should target formats panel');
 			} finally {
 				controller.dispose();
 				restoreConfig();

@@ -46,7 +46,7 @@ suite('Accessibility View Links', () => {
 		};
 
 		// Render the summary section
-		const html = (summaryProvider as any).renderSummarySection(data);
+		const html = (summaryProvider as any).renderContent(data);
 
 		// Verify the link uses command:vscode.open format (same as WCAG panel)
 		const uriWithFragment = `${testUri.toString()}#13`;
@@ -94,7 +94,7 @@ suite('Accessibility View Links', () => {
 			section: 'summary'
 		};
 
-		const html = (summaryProvider as any).renderSummarySection(data);
+		const html = (summaryProvider as any).renderContent(data);
 
 		// Should have 2 command:vscode.open links
 		const uriWithFragment1 = `${themeUri.toString()}#10`;
@@ -140,7 +140,7 @@ suite('Accessibility View Links', () => {
 			section: 'summary'
 		};
 
-		const html = (summaryProvider as any).renderSummarySection(data);
+		const html = (summaryProvider as any).renderContent(data);
 
 		// Should use command:vscode.open format with encoded args
 		const uriWithFragment = `${pathWithSpaces.toString()}#1`;
@@ -189,7 +189,7 @@ suite('Accessibility View Links', () => {
 			section: 'summary'
 		};
 
-		const html = (summaryProvider as any).renderSummarySection(data);
+		const html = (summaryProvider as any).renderContent(data);
 
 		// Verify links use the same format as WCAG panel (command:vscode.open with encoded args)
 		// This is the format that actually works in webviews
@@ -251,7 +251,7 @@ suite('Accessibility View Links', () => {
 			searchValue: 'red'
 		};
 
-		const html = (formatsProvider as any).renderUsageMatchesWithConversions(data);
+		const html = (formatsProvider as any).renderContent(data);
 
 		assert.ok(html.includes('app.css'), 'Convertible match should be rendered');
 		assert.ok(!html.includes('app.module.css'), 'Non-convertible match should be filtered out');

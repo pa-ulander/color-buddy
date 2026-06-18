@@ -26,6 +26,7 @@ export interface CommandTestEnvironment {
 	setPerformanceLoggingEnabled(enabled: boolean): void;
 	setFindFilesResults(results: vscode.Uri[]): void;
 	getFindFilesInvocations(): Array<{ include: vscode.GlobPattern; exclude?: vscode.GlobPattern }>;
+	addMockDocument(doc: vscode.TextDocument): void;
 	restore(): Promise<void>;
 }
 
@@ -111,6 +112,7 @@ export async function setupCommandTestEnvironment(options?: {
 	let nextTextSearchMatches: vscode.TextSearchMatch[] = [];
 	let nextFindFilesResults: vscode.Uri[] = [];
 	const findFilesInvocations: Array<{ include: vscode.GlobPattern; exclude?: vscode.GlobPattern }> = [];
+	const mockDocuments = new Map<string, vscode.TextDocument>();
 	const originalProcessMaxListeners = process.getMaxListeners();
 	process.setMaxListeners(0);
 
@@ -227,6 +229,12 @@ export async function setupCommandTestEnvironment(options?: {
 	const originalOpenTextDocument = vscode.workspace.openTextDocument;
 	(vscode.workspace as unknown as{ openTextDocument: typeof vscode.workspace.openTextDocument }).openTextDocument = (async (uriOrOptions: vscode.Uri | { language?: string; content?: string }) => {
 		if (uriOrOptions instanceof vscode.Uri) {
+			// Check registered mock documents first
+			const mockDoc = mockDocuments.get(uriOrOptions.toString());
+			if (mockDoc) {
+				return mockDoc;
+			}
+
 			// Return fixture file directly
 			const fsPath = uriOrOptions.fsPath;
 			if (fsPath.includes('fixtures') && fsPath.endsWith('.css')) {
@@ -406,6 +414,9 @@ export async function setupCommandTestEnvironment(options?: {
 			nextFindFilesResults = results;
 		},
 		getFindFilesInvocations: () => findFilesInvocations,
+		addMockDocument: (doc: vscode.TextDocument) => {
+			mockDocuments.set(doc.uri.toString(), doc);
+		},
 		restore
 	};
 }

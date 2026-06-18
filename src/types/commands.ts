@@ -56,4 +56,5 @@ export interface FindUsagesCommandPayload {
 	source?: CopyColorCommandSource;
 	label?: string;
 	metadata?: TestAccessibilityCommandMetadata;
+	panel?: 'contexts' | 'formats';
 }

@@ -34,10 +34,10 @@ const QUICK_ACTIONS: QuickAction[] = [
 	{ command: 'colorbuddy.testColorAccessibility', label: t(LocalizedStrings.COMMAND_QUICK_ACTION_ACCESSIBILITY), args: [{ panel: 'contrast' }] },
 	
 	// Panel 3: findUsagesPanel
-	{ command: 'colorbuddy.findColorUsages', label: t(LocalizedStrings.COMMAND_QUICK_ACTION_FIND_USAGES) },
+	{ command: 'colorbuddy.findColorUsages', label: t(LocalizedStrings.COMMAND_QUICK_ACTION_FIND_USAGES), args: [{ panel: 'contexts' }] },
 	
 	// Panel 4: formatConversionPanel
-	{ command: 'colorbuddy.testColorAccessibility', label: t(LocalizedStrings.COMMAND_QUICK_ACTION_CONVERT), args: [{ panel: 'formats' }] },
+	{ command: 'colorbuddy.findColorUsages', label: t(LocalizedStrings.COMMAND_QUICK_ACTION_CONVERT), args: [{ panel: 'formats' }] },
 	
 	// Utility actions (not panel-specific)
 	{ command: 'colorbuddy.copyColorAs', label: t(LocalizedStrings.COMMAND_QUICK_ACTION_COPY) },
@@ -57,9 +57,9 @@ export function appendQuickActions(markdown: vscode.MarkdownString, options?: Ap
 		const override = options?.overrides?.[action.command];
 		let args = override?.args ?? action.args;
 		
-		// Merge default action args with override args for testColorAccessibility
+		// Merge default action args with override args for testColorAccessibility and findColorUsages
 		// This preserves the panel parameter from the action while using the override payload
-		if (action.command === 'colorbuddy.testColorAccessibility' && override?.args && action.args) {
+		if ((action.command === 'colorbuddy.testColorAccessibility' || action.command === 'colorbuddy.findColorUsages') && override?.args && action.args) {
 			const defaultPanel = (action.args[0] as { panel?: string })?.panel;
 			const overridePayload = override.args[0] as Record<string, unknown>;
 			args = [{ ...overridePayload, panel: overridePayload.panel ?? defaultPanel }];

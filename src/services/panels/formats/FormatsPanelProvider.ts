@@ -1,6 +1,8 @@
+import * as vscode from 'vscode';
 import { BasePanelProvider } from '../base/BasePanelProvider';
 import type { AccessibilityViewData, AccessibilityUsageMatch } from '../../accessibilityViewProvider';
 import type { FormatConversion } from '../../../utils/colorFormatConversions';
+import { t, LocalizedStrings } from '../../../l10n/localization';
 
 /**
  * Panel 4: Format Conversions
@@ -65,24 +67,15 @@ export class FormatsPanelProvider extends BasePanelProvider {
 		// Render each match as an expandable conversion box
 		const matchBoxes = matches.map(match => this.renderMatchConversionBox(match, data, formatVariations)).join('');
 
-		// Bulk conversion button (future feature)
+		// Bulk conversion button
 		const bulkConversionSection = matches.length > 1 ? `
 			<div style="margin-top: 16px; padding: 12px; background: var(--vscode-editor-background); border-radius: 4px; text-align: center;">
-				<button style="
-					padding: 8px 16px;
-					background: var(--vscode-button-background);
-					color: var(--vscode-button-foreground);
-					border: none;
-					border-radius: 4px;
-					cursor: pointer;
-					font-size: 0.9em;
-					font-weight: 500;
-				" disabled>
-					<span class="codicon codicon-replace-all" style="margin-right: 6px;"></span>
-					Bulk Convert (Coming Soon)
+				<button id="bulk-convert-button" class="cb-bulk-button">
+					<span class="codicon codicon-replace-all"></span>
+					${t(LocalizedStrings.COMMAND_CONVERT_COLOR_BULK_CONVERT)}
 				</button>
 				<p style="margin: 8px 0 0 0; font-size: 0.85em; color: var(--vscode-descriptionForeground);">
-					Select formats using radio buttons, then convert all matches at once.
+					${t(LocalizedStrings.COMMAND_CONVERT_COLOR_BULK_CONVERT_HINT)}
 				</p>
 			</div>
 		` : '';
@@ -116,9 +109,10 @@ export class FormatsPanelProvider extends BasePanelProvider {
 		const currentFormat = this.detectCurrentFormat(match, formatVariations);
 
 		// Build conversion list for this specific match
-		const conversionItems = formatVariations.map(conversion => {
+		const conversionItems = formatVariations.map((conversion) => {
 			const label = this.getFormatLabel(conversion.format);
 			const isCurrent = conversion.format === currentFormat;
+			const isInitialSelect = isCurrent;
 
 			// Convert command payload
 			const convertPayload = {
@@ -134,7 +128,7 @@ export class FormatsPanelProvider extends BasePanelProvider {
 			};
 			const convertEncodedPayload = encodeURIComponent(JSON.stringify(convertPayload));
 			const convertCommandUri = `command:colorbuddy.convertColorFormat?${convertEncodedPayload}`;
-			const convertIcon = `<a href="${convertCommandUri}" class="cb-convert-icon" title="Convert to ${this.escapeHtml(label)}" style="color: var(--vscode-textLink-foreground); text-decoration: none; cursor: pointer; margin-right: 0.5rem;"><i class="codicon codicon-symbol-color"></i></a>`;
+			const convertIcon = `<a href="${convertCommandUri}" class="cb-icon-button" title="${t(LocalizedStrings.COMMAND_CONVERT_COLOR_REPLACE_TITLE, label)}"><i class="codicon codicon-replace"></i></a>`;
 
 			// Copy functionality
 			const copyPayload = {
@@ -144,19 +138,34 @@ export class FormatsPanelProvider extends BasePanelProvider {
 			};
 			const copyEncodedPayload = encodeURIComponent(JSON.stringify(copyPayload));
 			const copyCommandUri = `command:colorbuddy.copyColorAs?${copyEncodedPayload}`;
-			const copyIcon = `<a href="${copyCommandUri}" class="cb-copy-icon" title="Copy to clipboard" style="opacity: 0.7; cursor: pointer;"><i class="codicon codicon-copy"></i></a>`;
+			const copyIcon = `<a href="${copyCommandUri}" class="cb-icon-button" title="${t(LocalizedStrings.COMMAND_CONVERT_COLOR_COPY_TITLE)}"><i class="codicon codicon-copy"></i></a>`;
 
-			// Show green checkmark for current format
-			const checkmark = isCurrent ? `<span class="cb-format-check">✓</span>` : `<span class="cb-format-check" style="visibility: hidden;">✓</span>`;
-
+			// Radio button for bulk conversion
+			const matchIdPrefix = `match-${match.uri.toString().replace(/[^a-z0-9]/gi, '-')}-${match.range.start.line}-${match.range.start.character}`;
+			const radioName = `format-${matchIdPrefix}`;
+			
 			return `
-				<li class="cb-format-item ${isCurrent ? 'cb-current' : ''}" data-format="${this.escapeHtml(conversion.format)}" style="display: flex; align-items: center; padding: 4px 0; font-size: 0.9em; list-style: none;">
-					${checkmark}
-					<div style="flex: 1; margin-left: 0.5rem;">
-						<strong style="margin-right: 0.5em;">${this.escapeHtml(label)}:</strong>
-						<code style="background: var(--vscode-textCodeBlock-background); padding: 2px 4px; border-radius: 3px;">${this.escapeHtml(conversion.value)}</code>
+				<li class="cb-format-row ${isCurrent ? 'cb-current' : ''}">
+					<input type="radio" 
+						name="${this.escapeHtml(radioName)}" 
+						value="${this.escapeHtml(conversion.format)}" 
+						${isInitialSelect ? 'checked' : ''} 
+						data-uri="${this.escapeHtml(match.uri.toString())}"
+						data-start-line="${match.range.start.line}"
+						data-start-char="${match.range.start.character}"
+						data-end-line="${match.range.end.line}"
+						data-end-char="${match.range.end.character}"
+						data-normalized="${this.escapeHtml(data.normalizedColor)}"
+						data-original="${this.escapeHtml(match.previewText.trim())}"
+						class="cb-radio">
+					<div class="cb-format-info">
+						<span class="cb-format-label">${this.escapeHtml(label)}</span>
+						<code class="cb-format-code">${this.escapeHtml(conversion.value)}</code>
 					</div>
-					${convertIcon}${copyIcon}
+					<div class="cb-format-actions">
+						${copyIcon}
+						${convertIcon}
+					</div>
 				</li>
 			`;
 		}).join('');
@@ -166,15 +175,18 @@ export class FormatsPanelProvider extends BasePanelProvider {
 		const openCommandUri = `command:vscode.open?${openEncodedPayload}`;
 
 		return `
-			<details class="cb-usage-box" open style="margin-bottom: 12px; border: 1px solid var(--vscode-panel-border); border-radius: 4px; padding: 8px;">
-				<summary style="cursor: pointer; font-weight: 500; margin-bottom: 8px;">
-					<a href="${openCommandUri}" style="color: var(--vscode-textLink-foreground); text-decoration: none;">
+			<details class="cb-usage-box" open>
+				<summary class="cb-usage-header">
+					<span class="codicon codicon-chevron-right"></span>
+					<a href="${openCommandUri}" class="cb-file-link">
 						${this.escapeHtml(fileName)}:${lineNumber}
 					</a>
 				</summary>
-				<div style="padding-left: 12px; border-left: 2px solid var(--vscode-textLink-foreground); margin-left: 4px;">
-					<code style="display: block; margin-bottom: 8px; font-size: 0.85em; color: var(--vscode-descriptionForeground);">${this.escapeHtml(match.previewText)}</code>
-					<ul class="cb-list cb-format-list" style="margin: 0; padding: 0;">
+				<div class="cb-usage-content">
+					<div class="cb-code-preview">
+						${this.escapeHtml(match.previewText)}
+					</div>
+					<ul class="cb-format-list">
 						${conversionItems}
 					</ul>
 				</div>
@@ -229,5 +241,201 @@ export class FormatsPanelProvider extends BasePanelProvider {
 			case 'tailwindHsl': return 'Tailwind HSL';
 			default: return format.toUpperCase();
 		}
+	}
+
+	protected getCustomScripts(): string {
+		return `
+			<script>
+				(function() {
+					const vscode = acquireVsCodeApi();
+					const bulkButton = document.getElementById('bulk-convert-button');
+					
+					if (bulkButton) {
+						bulkButton.addEventListener('click', () => {
+							const selectedFormats = [];
+							const radios = document.querySelectorAll('input[type="radio"]:checked');
+							
+							radios.forEach(radio => {
+								selectedFormats.push({
+									uri: radio.getAttribute('data-uri'),
+									range: {
+										start: { 
+											line: parseInt(radio.getAttribute('data-start-line')), 
+											character: parseInt(radio.getAttribute('data-start-char')) 
+										},
+										end: { 
+											line: parseInt(radio.getAttribute('data-end-line')), 
+											character: parseInt(radio.getAttribute('data-end-char')) 
+										}
+									},
+									format: radio.value,
+									normalizedColor: radio.getAttribute('data-normalized'),
+									originalText: radio.getAttribute('data-original')
+								});
+							});
+							
+							vscode.postMessage({
+								command: 'bulkConvert',
+								conversions: selectedFormats
+							});
+						});
+					}
+				})();
+			</script>
+		`;
+	}
+
+	protected handleMessage(message: any): void {
+		if (message.command === 'bulkConvert') {
+			// Trigger a custom internal command or handle directly via extension controller
+			// For now, we'll use a new command we'll register in ExtensionController
+			vscode.commands.executeCommand('colorbuddy.bulkConvertColorFormat', message.conversions);
+		}
+	}
+
+	protected getCustomStyles(): string {
+		return `<style>
+			.cb-usage-box {
+				margin-bottom: 12px;
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 4px;
+				background: var(--vscode-sideBar-background);
+				overflow: hidden;
+			}
+			
+			.cb-usage-header {
+				cursor: pointer;
+				padding: 4px 8px;
+				background: var(--vscode-sideBarSectionHeader-background);
+				user-select: none;
+				display: flex;
+				align-items: center;
+				font-size: 12px;
+				font-weight: 600;
+				list-style: none; /* Hide default triangle */
+			}
+			
+			.cb-usage-header::-webkit-details-marker {
+				display: none; /* Hide for Safari */
+			}
+			
+			.cb-usage-header .codicon-chevron-right {
+				margin-right: 6px;
+				transition: transform 0.1s ease;
+			}
+			
+			.cb-usage-box[open] .cb-usage-header .codicon-chevron-right {
+				transform: rotate(90deg);
+			}
+			
+			.cb-file-link {
+				color: var(--vscode-textLink-foreground);
+				text-decoration: none;
+			}
+			
+			.cb-file-link:hover {
+				text-decoration: underline;
+			}
+			
+			.cb-usage-content {
+				padding: 8px 12px;
+				border-top: 1px solid var(--vscode-panel-border);
+			}
+			
+			.cb-code-preview {
+				margin-bottom: 8px;
+				padding: 6px;
+				background: var(--vscode-editor-background);
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 3px;
+				font-family: var(--vscode-editor-font-family);
+				font-size: 11px;
+				color: var(--vscode-descriptionForeground);
+				white-space: pre-wrap;
+				word-break: break-all;
+			}
+			
+			.cb-format-list {
+				list-style: none;
+				margin: 0;
+				padding: 0;
+			}
+			
+			.cb-format-row {
+				display: grid;
+				grid-template-columns: auto auto auto 1fr;
+				align-items: center;
+				gap: 12px;
+				padding: 6px 8px;
+				border-bottom: 1px solid transparent;
+			}
+			
+			.cb-format-row:last-child {
+				border-bottom: none;
+			}
+			
+			.cb-format-row:hover {
+				background: var(--vscode-list-hoverBackground);
+			}
+			
+			.cb-radio {
+				margin: 0 !important;
+				cursor: pointer;
+			}
+			
+			.cb-format-info {
+				display: contents !important;
+			}
+			
+			.cb-format-label {
+				display: inline-block !important;
+				font-size: 11px !important;
+				font-weight: 600 !important;
+				color: var(--vscode-foreground) !important;
+				text-align: right;
+				padding-right: 8px;
+				opacity: 1 !important;
+				visibility: visible !important;
+			}
+			
+			.cb-format-code {
+				display: inline-block !important;
+				font-family: var(--vscode-editor-font-family) !important;
+				font-size: 11px !important;
+				color: var(--vscode-foreground) !important;
+				background: var(--vscode-textCodeBlock-background) !important;
+				padding: 2px 6px;
+				border-radius: 3px;
+				white-space: nowrap;
+				opacity: 1 !important;
+				visibility: visible !important;
+			}
+			
+			.cb-format-actions {
+				display: flex;
+				gap: 6px;
+				justify-content: flex-end;
+			}
+			
+			.cb-icon-button {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				width: 22px;
+				height: 22px;
+				color: var(--vscode-textLink-foreground);
+				text-decoration: none;
+				border-radius: 3px;
+				cursor: pointer;
+			}
+			
+			.cb-icon-button:hover {
+				background: var(--vscode-toolbar-hoverBackground);
+			}
+			
+			.cb-icon-button .codicon {
+				font-size: 14px;
+			}
+		</style>`;
 	}
 }

@@ -36,7 +36,6 @@ import { Provider } from './provider';
 import { collectFormatConversions, getFormatLabel, appendFormatConversionList } from '../utils/colorFormatConversions';
 import type { FormatConversion } from '../utils/colorFormatConversions';
 import { appendQuickActions, EXECUTE_QUICK_ACTION_COMMAND, QuickActionLinkPayload } from '../utils/quickActions';
-import { buildConvertColorCommandPayload } from '../utils/commandPayloads';
 import { buildAccessibilityMetadata } from '../utils/accessibilityMetadata';
 import { getColorUsageCount } from '../utils/colorUsage';
 import { getColorInsights } from '../utils/colorInsights';
@@ -276,6 +275,9 @@ export class ExtensionController implements vscode.Disposable {
 			vscode.commands.registerCommand('colorbuddy.convertColorFormat', (payload?: ConvertColorCommandPayload) =>
 				this.handleConvertColorFormatCommand(payload)
 			),
+			vscode.commands.registerCommand('colorbuddy.bulkConvertColorFormat', (conversions: ConvertColorCommandPayload[]) => 
+				this.handleBulkConvertCommand(conversions)
+			),
 			vscode.commands.registerCommand(EXECUTE_QUICK_ACTION_COMMAND, payload => this.handleExecuteQuickActionCommand(payload)),
 			// TEST COMMAND - Directly reveal accessibilityTestResultPanel
 			vscode.commands.registerCommand('colorbuddy.testAccessibilityTestResultPanel', async () => {
@@ -418,8 +420,10 @@ export class ExtensionController implements vscode.Disposable {
 				format: context.colorData.format ?? 'hex'
 			};
 
+			const targetPanel = payload?.panel ?? 'contexts';
+
 			// Show "searching" state in panel immediately
-			await this.updateFindUsagesPanelSearching(context.label, []);
+			await this.updateFindUsagesPanelSearching(context.label, [], targetPanel, searchContext.normalizedColor);
 
 			// Search with progress notification using UsageSearchService
 			const allMatches = await vscode.window.withProgress({
@@ -432,7 +436,7 @@ export class ExtensionController implements vscode.Disposable {
 					searchContext,
 					async (currentMatches: ColorUsageMatch[]) => {
 						// Progressive callback - update panel with partial results
-						await this.updateFindUsagesPanel(context.label, currentMatches);
+						await this.updateFindUsagesPanel(context.label, currentMatches, undefined, targetPanel, searchContext.normalizedColor);
 					}
 				);
 				progress.report({ increment: 90 });
@@ -442,7 +446,7 @@ export class ExtensionController implements vscode.Disposable {
 			console.log(`${LOG_PREFIX} found ${allMatches.length} total matches`);
 			
 			// Final update to panel (clears "searching" state)
-			await this.updateFindUsagesPanel(context.label, allMatches);
+			await this.updateFindUsagesPanel(context.label, allMatches, undefined, targetPanel, searchContext.normalizedColor);
 			
 			if (allMatches.length === 0) {
 				await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_FIND_USAGES_NO_RESULTS, context.label));
@@ -763,6 +767,87 @@ export class ExtensionController implements vscode.Disposable {
 			console.error(`${LOG_PREFIX} failed to convert color from payload`, error);
 			await vscode.window.showErrorMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_ERROR));
 			return true;
+		}
+	}
+
+	/**
+	 * Handle bulk conversion of multiple color occurrences.
+	 */
+	private async handleBulkConvertCommand(conversions: ConvertColorCommandPayload[]): Promise<void> {
+		if (!conversions || !Array.isArray(conversions) || conversions.length === 0) {
+			return;
+		}
+
+		console.log(`${LOG_PREFIX} Starting bulk conversion for ${conversions.length} items`);
+
+		try {
+			// Group conversions by URI to optimize edits
+			const groupedByUri = new Map<string, ConvertColorCommandPayload[]>();
+			for (const conv of conversions) {
+				const list = groupedByUri.get(conv.uri) || [];
+				list.push(conv);
+				groupedByUri.set(conv.uri, list);
+			}
+
+			let totalConverted = 0;
+
+			// Wrap in progress notification
+			await vscode.window.withProgress({
+				location: vscode.ProgressLocation.Notification,
+				title: `Converting ${conversions.length} color occurrences...`,
+				cancellable: false
+			}, async (progress) => {
+				const increment = 100 / groupedByUri.size;
+
+				for (const [uriStr, siteConversions] of groupedByUri.entries()) {
+					const uri = vscode.Uri.parse(uriStr);
+					const doc = await vscode.workspace.openTextDocument(uri);
+					const editor = await vscode.window.showTextDocument(doc, { preview: false });
+
+					// Sort conversions for this file in REVERSE order (bottom to top)
+					// to avoid range shifts during replacement
+					const sortedConversions = [...siteConversions].sort((a, b) => {
+						if (b.range.start.line !== a.range.start.line) {
+							return b.range.start.line - a.range.start.line;
+						}
+						return b.range.start.character - a.range.start.character;
+					});
+
+					await editor.edit(editBuilder => {
+						for (const conv of sortedConversions) {
+							const parsed = this.colorParser.parseColor(conv.normalizedColor || conv.originalText || '');
+							if (parsed && conv.format) {
+								const formatted = this.colorFormatter.formatByFormat(parsed.vscodeColor, conv.format);
+								if (formatted) {
+									const start = new vscode.Position(conv.range.start.line, conv.range.start.character);
+									const end = new vscode.Position(conv.range.end.line, conv.range.end.character);
+									const range = new vscode.Range(start, end);
+									
+									const existingText = doc.getText(range);
+									const hasTrailingSemicolon = existingText.trimEnd().endsWith(';');
+									const formattedWithSemicolon = hasTrailingSemicolon && !formatted.trimEnd().endsWith(';')
+										? `${formatted};`
+										: formatted;
+
+									editBuilder.replace(range, formattedWithSemicolon);
+									totalConverted++;
+								}
+							}
+						}
+					});
+
+					progress.report({ increment });
+				}
+			});
+
+			await vscode.window.showInformationMessage(`Successfully converted ${totalConverted} occurrences across ${groupedByUri.size} file(s).`);
+			
+			// Refresh all editors to update decorations
+			this.refreshVisibleEditors();
+			
+		} catch (error) {
+			console.error(`${LOG_PREFIX} Bulk conversion failed`, error);
+			await vscode.window.showErrorMessage('Bulk conversion failed. Check console for details.');
 		}
 	}
 
@@ -1857,47 +1942,63 @@ export class ExtensionController implements vscode.Disposable {
 
 	// Color search methods removed - now handled by UsageSearchService
 
-	private async updateFindUsagesPanelSearching(colorLabel: string, searchCandidates: string[]): Promise<void> {
+	private async updateFindUsagesPanelSearching(colorLabel: string, searchCandidates: string[], targetPanel: 'contexts' | 'formats' = 'contexts', normalizedColor?: string): Promise<void> {
 		console.log(`${LOG_PREFIX} preparing to search for ${searchCandidates.length} color format variations of "${colorLabel}"`);
 		
 		// Show initial "searching" state with format variations
-		await this.updateFindUsagesPanel(colorLabel, [], searchCandidates);
+		await this.updateFindUsagesPanel(colorLabel, [], searchCandidates, targetPanel, normalizedColor);
 	}
 
-	private async updateFindUsagesPanel(searchValue: string, matches: ColorUsageMatch[], searchCandidates?: string[]): Promise<void> {
+	private async updateFindUsagesPanel(searchValue: string, matches: ColorUsageMatch[], searchCandidates?: string[], targetPanel: 'contexts' | 'formats' = 'contexts', normalizedColor?: string): Promise<void> {
 		// Convert matches to the format expected by the view
 		const usageMatches = matches.map(match => ({
 			uri: match.uri,
 			range: match.range,
 			previewText: match.previewText,
-			relativePath: vscode.workspace.asRelativePath(match.uri, false)
+			relativePath: vscode.workspace.asRelativePath(match.uri, false),
+			isConvertible: true
 		}));
 
-		// Create a minimal data object for the find usages panel
+		// If we're targeting the formats panel, we need real color data for conversions
+		let conversions: FormatConversion[] = [];
+		let insights = { name: '', hex: '', brightness: 0 };
+		
+		if (targetPanel === 'formats' || searchCandidates) {
+			// Use normalizedColor if provided (for CSS vars/classes), otherwise try searchValue
+			const colorToParse = normalizedColor || searchValue;
+			const parsed = this.colorParser.parseColor(colorToParse);
+			if (parsed) {
+				conversions = collectFormatConversions(this.colorParser, this.colorFormatter, parsed.vscodeColor, parsed.formatPriority[0]);
+				insights = getColorInsights(parsed.vscodeColor);
+			}
+		}
+
+		// Create a unified data object for both panels
 		const data: AccessibilityViewData = {
 			label: searchValue,
-			normalizedColor: '', // Not needed for find usages
-			colorName: searchCandidates ? `Searching ${searchCandidates.length} formats...` : '',
-			colorHex: '',
-			brightness: 0,
-			report: { samples: [] } as any, // Not needed for find usages
-			conversions: searchCandidates ? searchCandidates.map(c => ({ format: 'custom' as any, value: c, label: c })) : [],
+			normalizedColor: insights.hex,
+			colorName: searchCandidates ? `Searching ${searchCandidates.length} formats...` : (insights.name || ''),
+			colorHex: insights.hex,
+			brightness: insights.brightness,
+			report: { samples: [] } as any, // Only needed for contrast panel
+			conversions: conversions.length > 0 ? conversions : (searchCandidates ? searchCandidates.map(c => ({ format: 'custom' as any, value: c, label: c })) : []),
 			usageMatches,
-			searchValue
+			searchValue,
+			section: targetPanel
 		};
 
-		console.log(`${LOG_PREFIX} Updating find usages panel with ${matches.length} matches${searchCandidates ? ' (searching...)' : ''}`);
+		console.log(`${LOG_PREFIX} Updating ${targetPanel} panel with ${matches.length} matches${searchCandidates ? ' (searching...)' : ''}`);
 		
 		// Update the content FIRST so it's ready when panel opens
-		this.accessibilityViewProvider.updateReport(data, 'contexts');
+		this.accessibilityViewProvider.updateReport(data, targetPanel);
 		
 		// Now reveal the container and panel with content already loaded
 		try {
-			await vscode.commands.executeCommand(COLORBUDDY_CONTAINER_COMMAND);
-			await this.accessibilityViewProvider.revealSection('contexts', true);
-			console.log(`${LOG_PREFIX} Find usages panel revealed with ${matches.length} matches`);
+			await vscode.commands.executeCommand('workbench.view.extension.colorbuddy');
+			await this.accessibilityViewProvider.revealSection(targetPanel, true);
+			console.log(`${LOG_PREFIX} ${targetPanel} panel revealed with ${matches.length} matches`);
 		} catch (error) {
-			console.error(`${LOG_PREFIX} Failed to reveal find usages panel:`, error);
+			console.error(`${LOG_PREFIX} Failed to reveal ${targetPanel} panel:`, error);
 		}
 	}
 
@@ -1938,7 +2039,6 @@ export class ExtensionController implements vscode.Disposable {
 		appendFormatConversionList(markdown, conversions, { surface: 'statusBar' });
 
 		const copyPayload = this.buildQuickActionCopyPayload(data, conversions, primaryValue);
-		const convertPayload = buildConvertColorCommandPayload(data, 'statusBar');
 		const metadata = buildAccessibilityMetadata(data, metrics.usageCount);
 		const accessibilityPayload: TestAccessibilityCommandPayload | undefined = data.normalizedColor
 			? {
@@ -1962,9 +2062,6 @@ export class ExtensionController implements vscode.Disposable {
 		const overrides: Record<string, { args?: unknown[] }> = {};
 		if (copyPayload) {
 			overrides['colorbuddy.copyColorAs'] = { args: [copyPayload] };
-		}
-		if (convertPayload) {
-			overrides['colorbuddy.convertColorFormat'] = { args: [convertPayload] };
 		}
 		if (accessibilityPayload) {
 			overrides['colorbuddy.testColorAccessibility'] = { args: [accessibilityPayload] };
