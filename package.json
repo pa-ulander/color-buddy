@@ -172,7 +172,7 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
     "@types/vscode": "^1.106.1",
-    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-cli": "^0.0.11",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.7.0",
     "eslint": "^9.39.1",
@@ -185,5 +185,9 @@
   "dependencies": {
     "@vscode/l10n": "^0.0.18",
     "dotenv": "^16.4.5"
+  },
+  "overrides": {
+    "diff": "^8.0.3",
+    "serialize-javascript": "^7.0.5"
   }
 }
