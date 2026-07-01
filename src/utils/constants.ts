@@ -193,6 +193,9 @@ export const RGB_FUNCTION_PATTERN = /\b(?:rgb|rgba)\(([^\n]*?)\)/gi;
 /** Pattern for matching HSL/HSLA functions */
 export const HSL_FUNCTION_PATTERN = /\b(?:hsl|hsla)\(([^\n]*?)\)/gi;
 
+/** Pattern for matching OKLab/OKLCH functions */
+export const OKLAB_OKLCH_FUNCTION_PATTERN = /\b(?:oklab|oklch)\(([^\n]*?)\)/gi;
+
 /** Pattern for matching Tailwind compact HSL format */
 export const TAILWIND_HSL_PATTERN = /(?<![\w#(])([0-9]+(?:\.[0-9]+)?\s+[0-9]+(?:\.[0-9]+)?%\s+[0-9]+(?:\.[0-9]+)?%(?:\s*\/\s*(?:0?\.\d+|1(?:\.0+)?))?)/g;
 
@@ -200,7 +203,7 @@ export const TAILWIND_HSL_PATTERN = /(?<![\w#(])([0-9]+(?:\.[0-9]+)?\s+[0-9]+(?:
 export const CSS_VAR_PATTERN = /var\(\s*(--[\w-]+)\s*\)/g;
 
 /** Pattern for matching CSS variables wrapped in color functions */
-export const CSS_VAR_IN_FUNCTION_PATTERN = /\b(hsl|hsla|rgb|rgba)\(\s*var\(\s*(--[\w-]+)\s*\)\s*\)/gi;
+export const CSS_VAR_IN_FUNCTION_PATTERN = /\b(hsl|hsla|rgb|rgba|oklab|oklch)\(\s*var\(\s*(--[\w-]+)\s*\)\s*\)/gi;
 
 /** Pattern for matching Tailwind color utility classes */
 export const TAILWIND_CLASS_PATTERN = /\b(bg|text|border|ring|shadow|from|via|to|outline|decoration|divide|accent|caret)-(\w+(?:-\w+)?)\b/g;
