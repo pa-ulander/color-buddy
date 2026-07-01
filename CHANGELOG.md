@@ -3,6 +3,20 @@
 All notable changes to the **ColorBuddy** extension will be documented in this file.
 
 
+## [0.0.5] - 2026-07-01
+
+### Changed
+- Optimized release packaging by tightening `.vscodeignore` exclusions.
+- Removed development-only artifacts from VSIX output (logs, benchmarks, graphics scratch assets, test fixtures, and internal documentation).
+
+### Added
+- Published refreshed release artifact for `v0.0.5` with reduced package footprint.
+
+### Notes
+- No runtime feature changes.
+- No breaking changes.
+
+
 ## [0.0.4] - 2026-07-01
 
 ### Fixed

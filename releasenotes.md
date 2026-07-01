@@ -1,8 +1,30 @@
 # ColorBuddy Release Notes
 
-## Version 0.0.4 - Upcoming
+## Version 0.0.5 - July 1, 2026
 
-_Release date: to be announced._
+### Packaging Size Optimization
+
+This release focuses on distribution quality and package hygiene. Reduced extension package size by tightening VSIX inclusion rules so development artifacts are no longer shipped to users.
+
+### What Changed
+
+**Lean VSIX Packaging**
+- Updated `.vscodeignore` to exclude development-only content from published artifacts.
+- Removed benchmark outputs, logs, graphics scratch assets, test fixtures, and internal docs from release packaging.
+- Kept runtime assets intact (compiled extension, icon, and README-referenced images).
+
+**Release Pipeline Update**
+- Published new `v0.0.5` artifact reflecting the optimized package contents.
+
+### Why This Matters
+
+Users download and install a significantly smaller extension package with no runtime feature loss. This improves install/update efficiency and reduces disk footprint while preserving all editor functionality.
+
+### Upgrading
+
+Update from the VS Code marketplace (or `code --install-extension`). No configuration changes are required.
+
+## Version 0.0.4 - July 1, 2026
 
 ### PostCSS Coverage & Watcher Reliability
 
