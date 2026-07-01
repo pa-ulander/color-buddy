@@ -56,7 +56,7 @@ const FIXTURE_FILES: Record<string, { file: string; variable: string }> = {
 
 const LANGUAGE_FIXTURES: Record<string, { content: string; variable: string }> = {};
 
-const NATIVE_COLOR_PROVIDER_LANGUAGES = new Set(['css', 'scss', 'less']);
+const NATIVE_COLOR_PROVIDER_LANGUAGES = new Set(['css', 'scss', 'less', 'vue']);
 
 function getEnsureColorData(controller: unknown) {
 	return (controller as unknown as { ensureColorData(document: vscode.TextDocument): Promise<ColorData[]> }).ensureColorData.bind(controller);

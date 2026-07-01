@@ -46,6 +46,8 @@ const NATIVE_COLOR_PROVIDER_LANGUAGES = new Set([
 	'less'
 ]);
 
+const VOLAR_EXTENSION_ID = 'vue.volar';
+
 const CSS_LIKE_FILE_EXTENSIONS = new Set([
 	'.css',
 	'.scss',
@@ -912,8 +914,18 @@ export class ExtensionController implements vscode.Disposable {
 			return CSS_LIKE_FILE_EXTENSIONS.has(extension);
 		}
 
+		private isVolarActive(): boolean {
+			return vscode.extensions.getExtension(VOLAR_EXTENSION_ID)?.isActive === true;
+		}
+
 		private isNativeColorProviderDocument(document: vscode.TextDocument): boolean {
-			return NATIVE_COLOR_PROVIDER_LANGUAGES.has(document.languageId);
+			if (NATIVE_COLOR_PROVIDER_LANGUAGES.has(document.languageId)) {
+				return true;
+			}
+			if (document.languageId === 'vue' && this.isVolarActive()) {
+				return true;
+			}
+			return false;
 		}
 
 		private isSassDocument(document: vscode.TextDocument): boolean {

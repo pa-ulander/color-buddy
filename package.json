@@ -2,7 +2,7 @@
   "name": "colorbuddy",
   "displayName": "Color Buddy - Your VS Code Color Companion",
   "description": "Adds color indicators and displays some useful info on hover anywhere a color code, cssclass or style containing a colordefinition or --variable is found. Helps you to quickly find and navigate to the color definition.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "PAUlander",
   "repository": {
     "type": "git",
@@ -172,7 +172,7 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
     "@types/vscode": "^1.106.1",
-    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-cli": "^0.0.11",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.7.0",
     "eslint": "^9.39.1",
@@ -185,5 +185,9 @@
   "dependencies": {
     "@vscode/l10n": "^0.0.18",
     "dotenv": "^16.4.5"
+  },
+  "overrides": {
+    "diff": "^8.0.3",
+    "serialize-javascript": "^7.0.5"
   }
 }
