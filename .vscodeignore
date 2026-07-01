@@ -12,3 +12,24 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 **/.vscode-test.*
+logs/**
+benchmarks/**
+graphics/**
+test-fixtures/**
+.github/**
+bin/**
+scripts/**
+docs/**
+.env*
+*.code-workspace
+**/.DS_Store
+# Keep only necessary img files: icon and those referenced in README.md
+img/banner.png
+img/banner-2.png
+img/banner2.png
+img/Generated\ Image\ November\ 20,\ 2025\ -\ 6_09AM.png
+img/screen.png
+img/color_preview.png
+img/colorbuddy-is-friendly-and-plays-nice-with-tailwind-intellisense.png
+img/tailwind-color-class-preview-cropped.png
+img/px.gif
