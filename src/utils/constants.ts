@@ -197,7 +197,7 @@ export const HSL_FUNCTION_PATTERN = /\b(?:hsl|hsla)\(([^\n]*?)\)/gi;
 export const OKLAB_OKLCH_FUNCTION_PATTERN = /\b(?:oklab|oklch)\(([^\n]*?)\)/gi;
 
 /** Pattern for matching Tailwind compact HSL format */
-export const TAILWIND_HSL_PATTERN = /(?<![\w#(])([0-9]+(?:\.[0-9]+)?\s+[0-9]+(?:\.[0-9]+)?%\s+[0-9]+(?:\.[0-9]+)?%(?:\s*\/\s*(?:0?\.\d+|1(?:\.0+)?))?)/g;
+export const TAILWIND_HSL_PATTERN = /(?<![\w#(.])([0-9]+(?:\.[0-9]+)?\s+[0-9]+(?:\.[0-9]+)?%\s+[0-9]+(?:\.[0-9]+)?%(?:\s*\/\s*(?:0?\.\d+|1(?:\.0+)?))?)/g;
 
 /** Pattern for matching CSS variable references */
 export const CSS_VAR_PATTERN = /var\(\s*(--[\w-]+)\s*\)/g;

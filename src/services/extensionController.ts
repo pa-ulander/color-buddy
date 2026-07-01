@@ -43,7 +43,8 @@ const CSS_LIKE_LANGUAGES = new Set([
 const NATIVE_COLOR_PROVIDER_LANGUAGES = new Set([
 	'css',
 	'scss',
-	'less'
+	'less',
+	'html'
 ]);
 
 const VOLAR_EXTENSION_ID = 'vue.volar';

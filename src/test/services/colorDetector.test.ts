@@ -149,6 +149,15 @@ suite('ColorDetector Service', () => {
             assert.strictEqual(results.length, 1);
             assert.strictEqual(results[0].originalText, 'hsl(0 100% 50%)');
         });
+
+        test('should not detect Tailwind HSL from decimal hue fragments inside hsl()', () => {
+            const doc = createMockDocument('color: hsl(9.13 100% 63.92%);');
+            const results = detector.collectColorData(doc, doc.getText());
+
+            // Should only detect the hsl() function, not the trailing "13 100% 63.92%" fragment
+            assert.strictEqual(results.length, 1);
+            assert.strictEqual(results[0].originalText, 'hsl(9.13 100% 63.92%)');
+        });
     });
 
     suite('CSS Variables', () => {
