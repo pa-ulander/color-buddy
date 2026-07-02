@@ -162,6 +162,34 @@ suite('ColorParser Service', () => {
         });
     });
 
+    suite('OKLab/OKLCH Functions', () => {
+        test('parses oklab() function', () => {
+            const result = parser.parseColor('oklab(0.62796 0.22486 0.12585)');
+            assert.ok(result);
+            assert.strictEqual(result.formatPriority[0], 'oklab');
+            assert.strictEqual(result.vscodeColor.alpha, 1);
+        });
+
+        test('parses oklch() function with alpha', () => {
+            const result = parser.parseColor('oklch(0.62796 0.25768 29.23 / 0.8)');
+            assert.ok(result);
+            assert.strictEqual(result.formatPriority[0], 'oklch');
+            assert.strictEqual(result.vscodeColor.alpha, 0.8);
+        });
+
+        test('parses oklch() with hue units', () => {
+            const result = parser.parseColor('oklch(0.7 0.18 240deg)');
+            assert.ok(result);
+            assert.strictEqual(result.formatPriority[0], 'oklch');
+        });
+
+        test('rejects malformed oklab/oklch', () => {
+            assert.strictEqual(parser.parseColor('oklab(0.6 0.1)'), undefined);
+            assert.strictEqual(parser.parseColor('oklch(0.6 0.1)'), undefined);
+            assert.strictEqual(parser.parseColor('oklch(0.6 0.1 bad)'), undefined);
+        });
+    });
+
     suite('Tailwind Compact HSL', () => {
         test('parses Tailwind compact format without alpha', () => {
             const result = parser.parseColor('200 50% 40%');
@@ -218,6 +246,13 @@ suite('ColorParser Service', () => {
             assert.ok(color);
         });
 
+        test('parses OKLab and OKLCH to VSCode Color', () => {
+            const oklab = parser.parseColorToVSCode('oklab(0.62796 0.22486 0.12585)');
+            const oklch = parser.parseColorToVSCode('oklch(0.62796 0.25768 29.23)');
+            assert.ok(oklab);
+            assert.ok(oklch);
+        });
+
         test('returns undefined for invalid color', () => {
             assert.strictEqual(parser.parseColorToVSCode('not-a-color'), undefined);
         });
@@ -234,6 +269,8 @@ suite('ColorParser Service', () => {
             assert.ok(priority.includes('rgba'));
             assert.ok(priority.includes('hsla'));
             assert.ok(priority.includes('tailwind'));
+            assert.ok(priority.includes('oklab'));
+            assert.ok(priority.includes('oklch'));
         });
 
         test('does not duplicate formats', () => {
@@ -243,13 +280,13 @@ suite('ColorParser Service', () => {
         });
 
         test('handles all format types', () => {
-            const formats: Array<'hex' | 'hexAlpha' | 'rgb' | 'rgba' | 'hsl' | 'hsla' | 'tailwind'> = 
-                ['hex', 'hexAlpha', 'rgb', 'rgba', 'hsl', 'hsla', 'tailwind'];
+            const formats: Array<'hex' | 'hexAlpha' | 'rgb' | 'rgba' | 'hsl' | 'hsla' | 'tailwind' | 'oklab' | 'oklch'> = 
+                ['hex', 'hexAlpha', 'rgb', 'rgba', 'hsl', 'hsla', 'tailwind', 'oklab', 'oklch'];
             
             for (const format of formats) {
                 const priority = parser.getFormatPriority(format);
                 assert.strictEqual(priority[0], format);
-                assert.ok(priority.length >= 7);
+                assert.ok(priority.length >= 9);
             }
         });
     });

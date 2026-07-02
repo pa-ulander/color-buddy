@@ -367,6 +367,10 @@ export class Provider {
             formatType = t(LocalizedStrings.TOOLTIP_FORMAT_RGBA);
         } else if (data.originalText.startsWith('hsl')) {
             formatType = t(LocalizedStrings.TOOLTIP_FORMAT_HSLA);
+        } else if (data.originalText.toLowerCase().startsWith('oklab(')) {
+            formatType = t(LocalizedStrings.TOOLTIP_FORMAT_OKLAB_LABEL);
+        } else if (data.originalText.toLowerCase().startsWith('oklch(')) {
+            formatType = t(LocalizedStrings.TOOLTIP_FORMAT_OKLCH_LABEL);
         } else if (/^\d+(\.\d+)?\s+\d+(\.\d+)?%\s+\d+(\.\d+)?%/.test(data.originalText)) {
             formatType = t(LocalizedStrings.TOOLTIP_FORMAT_TAILWIND_HSL);
         }

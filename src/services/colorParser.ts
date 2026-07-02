@@ -30,6 +30,16 @@ export class ColorParser {
             return this.parseHslFunction(text);
         }
 
+        // Try OKLab function
+        if (/^oklab\(/i.test(text)) {
+            return this.parseOklabFunction(text);
+        }
+
+        // Try OKLCH function
+        if (/^oklch\(/i.test(text)) {
+            return this.parseOklchFunction(text);
+        }
+
         // Try Tailwind compact HSL format
         const tailwindMatch = text.match(/^([0-9]+(?:\.[0-9]+)?)\s+([0-9]+(?:\.[0-9]+)?)%\s+([0-9]+(?:\.[0-9]+)?)%(?:\s*\/\s*(0?\.\d+|1(?:\.0+)?))?$/i);
         if (tailwindMatch) {
@@ -64,6 +74,18 @@ export class ColorParser {
             return parsed?.vscodeColor;
         }
 
+        // OKLab function
+        if (/^oklab/i.test(text)) {
+            const parsed = this.parseOklabFunction(text);
+            return parsed?.vscodeColor;
+        }
+
+        // OKLCH function
+        if (/^oklch/i.test(text)) {
+            const parsed = this.parseOklchFunction(text);
+            return parsed?.vscodeColor;
+        }
+
         // Tailwind compact HSL
         const tailwindMatch = text.match(/^([0-9]+(?:\.[0-9]+)?)\s+([0-9]+(?:\.[0-9]+)?)%\s+([0-9]+(?:\.[0-9]+)?)%(?:\s*\/\s*(0?\.\d+|1(?:\.0+)?))?$/i);
         if (tailwindMatch) {
@@ -81,7 +103,7 @@ export class ColorParser {
     getFormatPriority(original: ColorFormat): ColorFormat[] {
         const priority = [original];
         // Expanded list to show more format variations
-        const fallbacks: ColorFormat[] = ['tailwind', 'rgba', 'hsla', 'hexAlpha', 'rgb', 'hsl', 'hex'];
+        const fallbacks: ColorFormat[] = ['tailwind', 'rgba', 'hsla', 'hexAlpha', 'rgb', 'hsl', 'hex', 'oklab', 'oklch'];
         
         for (const format of fallbacks) {
             if (!priority.includes(format)) {
@@ -214,6 +236,89 @@ export class ColorParser {
         };
     }
 
+    private parseOklabFunction(raw: string): ParsedColor | undefined {
+        const match = raw.match(/^oklab\((.*)\)$/i);
+        if (!match) {
+            return undefined;
+        }
+
+        const inner = match[1].trim();
+        if (/^from\b/i.test(inner)) {
+            return undefined;
+        }
+
+        const [channelsPart, alphaPart] = inner.split('/').map(part => part.trim());
+        const channels = channelsPart
+            .replace(/,/g, ' ')
+            .split(/\s+/)
+            .map(segment => segment.trim())
+            .filter(Boolean);
+
+        if (channels.length !== 3) {
+            return undefined;
+        }
+
+        const l = this.parseOklabLightness(channels[0]);
+        const a = this.parseOklabAxis(channels[1]);
+        const b = this.parseOklabAxis(channels[2]);
+        if (l === undefined || a === undefined || b === undefined) {
+            return undefined;
+        }
+
+        const rgb = this.oklabToSrgb(l, a, b);
+        const alpha = this.normalizeAlpha(alphaPart);
+        const color = new vscode.Color(rgb.r, rgb.g, rgb.b, alpha);
+
+        return {
+            vscodeColor: color,
+            cssString: this.rgbaString(color, false),
+            formatPriority: this.getFormatPriority('oklab')
+        };
+    }
+
+    private parseOklchFunction(raw: string): ParsedColor | undefined {
+        const match = raw.match(/^oklch\((.*)\)$/i);
+        if (!match) {
+            return undefined;
+        }
+
+        const inner = match[1].trim();
+        if (/^from\b/i.test(inner)) {
+            return undefined;
+        }
+
+        const [channelsPart, alphaPart] = inner.split('/').map(part => part.trim());
+        const channels = channelsPart
+            .replace(/,/g, ' ')
+            .split(/\s+/)
+            .map(segment => segment.trim())
+            .filter(Boolean);
+
+        if (channels.length !== 3) {
+            return undefined;
+        }
+
+        const l = this.parseOklabLightness(channels[0]);
+        const c = this.parseOklchChroma(channels[1]);
+        const h = this.parseHueDegrees(channels[2]);
+        if (l === undefined || c === undefined || h === undefined) {
+            return undefined;
+        }
+
+        const radians = (h * Math.PI) / 180;
+        const a = c * Math.cos(radians);
+        const b = c * Math.sin(radians);
+        const rgb = this.oklabToSrgb(l, a, b);
+        const alpha = this.normalizeAlpha(alphaPart);
+        const color = new vscode.Color(rgb.r, rgb.g, rgb.b, alpha);
+
+        return {
+            vscodeColor: color,
+            cssString: this.rgbaString(color, false),
+            formatPriority: this.getFormatPriority('oklch')
+        };
+    }
+
     private parseHexToVSCode(value: string): vscode.Color | undefined {
         const text = value.startsWith('#') ? value.slice(1) : value;
         const length = text.length;
@@ -288,6 +393,130 @@ export class ColorParser {
         }
         
         return this.clamp(numeric, 0, 1);
+    }
+
+    private parseOklabLightness(value: string): number | undefined {
+        const text = value.trim().toLowerCase();
+        if (text === 'none') {
+            return 0;
+        }
+
+        if (text.endsWith('%')) {
+            const percent = Number.parseFloat(text.slice(0, -1));
+            if (Number.isNaN(percent)) {
+                return undefined;
+            }
+            return this.clamp(percent / 100, 0, 1);
+        }
+
+        const numeric = Number.parseFloat(text);
+        if (Number.isNaN(numeric)) {
+            return undefined;
+        }
+        return this.clamp(numeric, 0, 1);
+    }
+
+    private parseOklabAxis(value: string): number | undefined {
+        const text = value.trim().toLowerCase();
+        if (text === 'none') {
+            return 0;
+        }
+
+        if (text.endsWith('%')) {
+            const percent = Number.parseFloat(text.slice(0, -1));
+            if (Number.isNaN(percent)) {
+                return undefined;
+            }
+            // CSS maps +/-100% to +/-0.4 for Oklab axis values.
+            return this.clamp((percent / 100) * 0.4, -0.5, 0.5);
+        }
+
+        const numeric = Number.parseFloat(text);
+        if (Number.isNaN(numeric)) {
+            return undefined;
+        }
+        return this.clamp(numeric, -0.5, 0.5);
+    }
+
+    private parseOklchChroma(value: string): number | undefined {
+        const text = value.trim().toLowerCase();
+        if (text === 'none') {
+            return 0;
+        }
+
+        if (text.endsWith('%')) {
+            const percent = Number.parseFloat(text.slice(0, -1));
+            if (Number.isNaN(percent)) {
+                return undefined;
+            }
+            // CSS maps 100% chroma to 0.4 in Oklch.
+            return this.clamp((percent / 100) * 0.4, 0, 0.5);
+        }
+
+        const numeric = Number.parseFloat(text);
+        if (Number.isNaN(numeric)) {
+            return undefined;
+        }
+        return this.clamp(numeric, 0, 0.5);
+    }
+
+    private parseHueDegrees(value: string): number | undefined {
+        const text = value.trim().toLowerCase();
+        if (text === 'none') {
+            return 0;
+        }
+
+        const angleRegex = /^([+-]?\d*\.?\d+)(deg|rad|grad|turn)?$/;
+        const match = text.match(angleRegex);
+        if (!match) {
+            return undefined;
+        }
+
+        const numeric = Number.parseFloat(match[1]);
+        if (Number.isNaN(numeric)) {
+            return undefined;
+        }
+
+        const unit = match[2] ?? 'deg';
+        let deg = numeric;
+        if (unit === 'rad') {
+            deg = (numeric * 180) / Math.PI;
+        } else if (unit === 'grad') {
+            deg = numeric * 0.9;
+        } else if (unit === 'turn') {
+            deg = numeric * 360;
+        }
+
+        const normalized = ((deg % 360) + 360) % 360;
+        return normalized;
+    }
+
+    private oklabToSrgb(l: number, a: number, b: number): { r: number; g: number; b: number } {
+        const lPrime = l + 0.3963377774 * a + 0.2158037573 * b;
+        const mPrime = l - 0.1055613458 * a - 0.0638541728 * b;
+        const sPrime = l - 0.0894841775 * a - 1.291485548 * b;
+
+        const lLinear = lPrime * lPrime * lPrime;
+        const mLinear = mPrime * mPrime * mPrime;
+        const sLinear = sPrime * sPrime * sPrime;
+
+        const rLinear = +4.0767416621 * lLinear - 3.3077115913 * mLinear + 0.2309699292 * sLinear;
+        const gLinear = -1.2684380046 * lLinear + 2.6097574011 * mLinear - 0.3413193965 * sLinear;
+        const bLinear = -0.0041960863 * lLinear - 0.7034186147 * mLinear + 1.707614701 * sLinear;
+
+        return {
+            r: this.linearRgbToSrgb(rLinear),
+            g: this.linearRgbToSrgb(gLinear),
+            b: this.linearRgbToSrgb(bLinear)
+        };
+    }
+
+    private linearRgbToSrgb(channel: number): number {
+        const clamped = this.clamp(channel, 0, 1);
+        if (clamped <= 0.0031308) {
+            return 12.92 * clamped;
+        }
+        return 1.055 * Math.pow(clamped, 1 / 2.4) - 0.055;
     }
 
     private hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {

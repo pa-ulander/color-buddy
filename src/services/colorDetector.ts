@@ -10,10 +10,10 @@ import type { ColorParser } from './colorParser';
  */
 export class ColorDetector {
     private static readonly HEX_COLOR_REGEX = /#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/g;
-    private static readonly FUNCTION_COLOR_REGEX = /\b(?:rgb|rgba|hsl|hsla)\(([^{\r\n]*?)\)/gi;
-    private static readonly TAILWIND_HSL_REGEX = /(?<![\w#(])([0-9]+(?:\.[0-9]+)?\s+[0-9]+(?:\.[0-9]+)?%\s+[0-9]+(?:\.[0-9]+)?%(?:\s*\/\s*(?:0?\.\d+|1(?:\.0+)?))?)/g;
+    private static readonly FUNCTION_COLOR_REGEX = /\b(?:rgb|rgba|hsl|hsla|oklab|oklch)\(([^{\r\n]*?)\)/gi;
+    private static readonly TAILWIND_HSL_REGEX = /(?<![\w#(.])([0-9]+(?:\.[0-9]+)?\s+[0-9]+(?:\.[0-9]+)?%\s+[0-9]+(?:\.[0-9]+)?%(?:\s*\/\s*(?:0?\.\d+|1(?:\.0+)?))?)/g;
     private static readonly CSS_VAR_REGEX = /var\(\s*(--[\w-]+)\s*\)/g;
-    private static readonly CSS_VAR_IN_FUNC_REGEX = /\b(hsl|hsla|rgb|rgba)\(\s*var\(\s*(--[\w-]+)\s*\)\s*\)/gi;
+    private static readonly CSS_VAR_IN_FUNC_REGEX = /\b(hsl|hsla|rgb|rgba|oklab|oklch)\(\s*var\(\s*(--[\w-]+)\s*\)\s*\)/gi;
     private static readonly CSS_VAR_DECLARATION_REGEX = /(--[\w-]+)\s*:\s*([^\n;]+)/g;
     private static readonly TAILWIND_CLASS_REGEX = /\b(bg|text|border|ring|shadow|from|via|to|outline|decoration|divide|accent|caret)-(\w+(?:-\w+)?)\b/g;
     private static readonly CLASS_NAME_REGEX = /class\s*=\s*["']([^"']+)["']/g;
@@ -129,7 +129,7 @@ export class ColorDetector {
         const varInFuncRegex = ColorDetector.reset(ColorDetector.CSS_VAR_IN_FUNC_REGEX);
         let varInFuncMatch: RegExpExecArray | null;
         while ((varInFuncMatch = varInFuncRegex.exec(text)) !== null) {
-            this.collectCSSVariableReference(document, varInFuncMatch.index, varInFuncMatch[0], varInFuncMatch[2], results, seenRanges, varInFuncMatch[1] as 'hsl' | 'hsla' | 'rgb' | 'rgba');
+            this.collectCSSVariableReference(document, varInFuncMatch.index, varInFuncMatch[0], varInFuncMatch[2], results, seenRanges, varInFuncMatch[1] as 'hsl' | 'hsla' | 'rgb' | 'rgba' | 'oklab' | 'oklch');
         }
 
         // Detect Tailwind color classes: bg-primary, text-accent, border-destructive, etc.
@@ -164,7 +164,7 @@ export class ColorDetector {
         variableName: string,
         results: ColorData[],
         seenRanges: Set<string>,
-        wrappingFunction?: 'hsl' | 'hsla' | 'rgb' | 'rgba'
+        wrappingFunction?: 'hsl' | 'hsla' | 'rgb' | 'rgba' | 'oklab' | 'oklch'
     ): void {
         const range = new vscode.Range(
             document.positionAt(startIndex),

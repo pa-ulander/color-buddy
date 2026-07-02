@@ -2,7 +2,7 @@
   "name": "colorbuddy",
   "displayName": "Color Buddy - Your VS Code Color Companion",
   "description": "Adds color indicators and displays some useful info on hover anywhere a color code, cssclass or style containing a colordefinition or --variable is found. Helps you to quickly find and navigate to the color definition.",
-  "version": "0.0.4",
+  "version": "0.0.61",
   "publisher": "PAUlander",
   "repository": {
     "type": "git",
@@ -211,19 +211,20 @@
     "compile": "webpack",
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
-    "compile-tests": "tsc -p . --outDir out",
+    "clean-tests": "node -e \"require('fs').rmSync('out', { recursive: true, force: true })\"",
+    "compile-tests": "npm run clean-tests && tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
-    "package-vsix": "npm run package && npx @vscode/vsce package",
+    "package-vsix": "npm run package && npx @vscode/vsce package --out bin/$(node -e \"const p=require('./package.json'); console.log(p.name+'-'+p.version+'.vsix')\") --no-update-package-json && rm -f bin/$(node -e \"const p=require('./package.json'); console.log(p.publisher.toLowerCase()+'.'+p.name+'-'+p.version+'.vsix')\")",
     "analyze-perf-log": "node scripts/analyze-perf-log.js"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
     "@types/vscode": "^1.106.1",
-    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-cli": "^0.0.11",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.7.0",
     "eslint": "^9.39.1",
@@ -236,5 +237,9 @@
   "dependencies": {
     "@vscode/codicons": "^0.0.44",
     "@vscode/l10n": "^0.0.18"
+  },
+  "overrides": {
+    "diff": "^8.0.3",
+    "serialize-javascript": "^7.0.5"
   }
 }

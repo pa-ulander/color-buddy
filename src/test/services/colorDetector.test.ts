@@ -104,6 +104,24 @@ suite('ColorDetector Service', () => {
             assert.strictEqual(results.length, 1);
             assert.strictEqual(results[0].originalText, 'hsl(0 100% 50% / 0.5)');
         });
+
+        test('should detect oklab() function', () => {
+            const doc = createMockDocument('color: oklab(0.62796 0.22486 0.12585);');
+            const results = detector.collectColorData(doc, doc.getText());
+
+            assert.strictEqual(results.length, 1);
+            assert.strictEqual(results[0].originalText, 'oklab(0.62796 0.22486 0.12585)');
+            assert.strictEqual(results[0].format, 'oklab');
+        });
+
+        test('should detect oklch() function with alpha', () => {
+            const doc = createMockDocument('color: oklch(0.62796 0.25768 29.23 / 0.8);');
+            const results = detector.collectColorData(doc, doc.getText());
+
+            assert.strictEqual(results.length, 1);
+            assert.strictEqual(results[0].originalText, 'oklch(0.62796 0.25768 29.23 / 0.8)');
+            assert.strictEqual(results[0].format, 'oklch');
+        });
     });
 
     suite('Tailwind Compact HSL', () => {
@@ -130,6 +148,15 @@ suite('ColorDetector Service', () => {
             // Should only detect the hsl() function, not the inner HSL values
             assert.strictEqual(results.length, 1);
             assert.strictEqual(results[0].originalText, 'hsl(0 100% 50%)');
+        });
+
+        test('should not detect Tailwind HSL from decimal hue fragments inside hsl()', () => {
+            const doc = createMockDocument('color: hsl(9.13 100% 63.92%);');
+            const results = detector.collectColorData(doc, doc.getText());
+
+            // Should only detect the hsl() function, not the trailing "13 100% 63.92%" fragment
+            assert.strictEqual(results.length, 1);
+            assert.strictEqual(results[0].originalText, 'hsl(9.13 100% 63.92%)');
         });
     });
 

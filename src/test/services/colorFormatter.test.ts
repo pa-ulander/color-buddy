@@ -71,6 +71,18 @@ suite('ColorFormatter Service', () => {
             assert.strictEqual(result, '0 100% 50%');
         });
 
+        test('should format color as oklab()', () => {
+            const color = new vscode.Color(1, 0, 0, 1);
+            const result = formatter.formatByFormat(color, 'oklab');
+            assert.ok(result?.startsWith('oklab('));
+        });
+
+        test('should format color as oklch()', () => {
+            const color = new vscode.Color(1, 0, 0, 1);
+            const result = formatter.formatByFormat(color, 'oklch');
+            assert.ok(result?.startsWith('oklch('));
+        });
+
         test('should return undefined for unknown format', () => {
             const color = new vscode.Color(1, 0, 0, 1);
             const result = formatter.formatByFormat(color, 'unknown' as ColorFormat);
@@ -281,6 +293,20 @@ suite('ColorFormatter Service', () => {
             assert.strictEqual(result.h, 60);
             assert.strictEqual(result.s, 100);
             assert.strictEqual(result.l, 50);
+        });
+    });
+
+    suite('OKLab/OKLCH output', () => {
+        test('should include alpha in oklab when transparent', () => {
+            const color = new vscode.Color(1, 0, 0, 0.5);
+            const result = formatter.formatByFormat(color, 'oklab');
+            assert.ok(result?.includes(' / 0.50'));
+        });
+
+        test('should include alpha in oklch when transparent', () => {
+            const color = new vscode.Color(1, 0, 0, 0.5);
+            const result = formatter.formatByFormat(color, 'oklch');
+            assert.ok(result?.includes(' / 0.50'));
         });
     });
 

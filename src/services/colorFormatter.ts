@@ -26,6 +26,10 @@ export class ColorFormatter {
                 return this.toHsl(color, true);
             case 'tailwind':
                 return this.toTailwind(color);
+            case 'oklab':
+                return this.toOklab(color);
+            case 'oklch':
+                return this.toOklch(color);
             default:
                 return undefined;
         }
@@ -96,6 +100,34 @@ export class ColorFormatter {
     }
 
     /**
+     * Convert color to OKLab string format.
+     */
+    toOklab(color: vscode.Color, forceAlpha = false): string {
+        const { l, a, b } = this.rgbToOklab(color.red, color.green, color.blue);
+        const base = `${this.roundTo(l, 5)} ${this.roundTo(a, 5)} ${this.roundTo(b, 5)}`;
+
+        if (!forceAlpha && color.alpha === 1) {
+            return `oklab(${base})`;
+        }
+
+        return `oklab(${base} / ${color.alpha.toFixed(2)})`;
+    }
+
+    /**
+     * Convert color to OKLCH string format.
+     */
+    toOklch(color: vscode.Color, forceAlpha = false): string {
+        const { l, c, h } = this.rgbToOklch(color.red, color.green, color.blue);
+        const base = `${this.roundTo(l, 5)} ${this.roundTo(c, 5)} ${this.roundTo(h, 5)}`;
+
+        if (!forceAlpha && color.alpha === 1) {
+            return `oklch(${base})`;
+        }
+
+        return `oklch(${base} / ${color.alpha.toFixed(2)})`;
+    }
+
+    /**
      * Convert RGB values to HSL color space.
      * @param r - Red component (0-255)
      * @param g - Green component (0-255)
@@ -126,10 +158,53 @@ export class ColorFormatter {
         return { h: h * 360, s: s * 100, l: l * 100 };
     }
 
+    rgbToOklab(r: number, g: number, b: number): { l: number; a: number; b: number } {
+        const rLinear = this.srgbToLinear(this.clamp(r, 0, 1));
+        const gLinear = this.srgbToLinear(this.clamp(g, 0, 1));
+        const bLinear = this.srgbToLinear(this.clamp(b, 0, 1));
+
+        const l = Math.cbrt(0.4122214708 * rLinear + 0.5363325363 * gLinear + 0.0514459929 * bLinear);
+        const m = Math.cbrt(0.2119034982 * rLinear + 0.6806995451 * gLinear + 0.1073969566 * bLinear);
+        const s = Math.cbrt(0.0883024619 * rLinear + 0.2817188376 * gLinear + 0.6299787005 * bLinear);
+
+        return {
+            l: 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+            a: 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+            b: 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s
+        };
+    }
+
+    rgbToOklch(r: number, g: number, b: number): { l: number; c: number; h: number } {
+        const oklab = this.rgbToOklab(r, g, b);
+        const c = Math.sqrt(oklab.a * oklab.a + oklab.b * oklab.b);
+        let h = (Math.atan2(oklab.b, oklab.a) * 180) / Math.PI;
+        if (h < 0) {
+            h += 360;
+        }
+
+        return { l: oklab.l, c, h };
+    }
+
     /**
      * Round a number to 2 decimal places.
      */
     private round(value: number): number {
         return Math.round(value * 100) / 100;
+    }
+
+    private roundTo(value: number, decimals: number): number {
+        const factor = Math.pow(10, decimals);
+        return Math.round(value * factor) / factor;
+    }
+
+    private srgbToLinear(channel: number): number {
+        if (channel <= 0.04045) {
+            return channel / 12.92;
+        }
+        return Math.pow((channel + 0.055) / 1.055, 2.4);
+    }
+
+    private clamp(value: number, min: number, max: number): number {
+        return Math.min(Math.max(value, min), max);
     }
 }

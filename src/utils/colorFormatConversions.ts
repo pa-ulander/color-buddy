@@ -75,6 +75,10 @@ export function getFormatLabel(format: ColorFormat): string {
             return t(LocalizedStrings.TOOLTIP_FORMAT_HSLA_LABEL);
         case 'tailwind':
             return t(LocalizedStrings.TOOLTIP_FORMAT_TAILWIND_LABEL);
+        case 'oklab':
+            return t(LocalizedStrings.TOOLTIP_FORMAT_OKLAB_LABEL);
+        case 'oklch':
+            return t(LocalizedStrings.TOOLTIP_FORMAT_OKLCH_LABEL);
         default:
             return format;
     }
