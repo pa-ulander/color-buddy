@@ -2,12 +2,8 @@
 
 All notable changes to the **ColorBuddy** extension will be documented in this file.
 
-## [Unreleased]
 
-
-## [0.0.4] - Upcoming
-
-_Release date: to be announced._
+## [0.0.61] - 2026-07-02
 
 ### Added
 - **"Display Summary" Quick Action**: New button added as first (leftmost) quick action in hover tooltips that opens the Accessibility Summary panel with complete color details
@@ -28,6 +24,10 @@ _Release date: to be announced._
 - Comprehensive fixture-driven coverage across the default language list, Tailwind utilities, and CSS variable scenarios to safeguard hover, decoration, and color picker behavior.
 - Watcher integration tests validating registry refresh on create/change events and cleanup on delete to prevent stale metadata.
 - Hover and status bar tooltips now surface codicon-based copy actions and shared CSS variable context swatches for consistent affordances across surfaces.
+- Added support for CSS `oklab(...)` and `oklch(...)` detection, parsing, and formatting.
+- Added optional alpha handling for OK color formats.
+- Added OKLCH hue unit parsing support (`deg`, `rad`, `grad`, `turn`).
+- Added integration/service test coverage for OKLab/OKLCH behavior.
 
 ### Changed
 - **Improved Panel UX**: Accessibility panels no longer auto-open when selecting colors; panels open only via explicit quick action clicks
@@ -40,6 +40,7 @@ _Release date: to be announced._
 - Decoration scheduler improvements (chunk yields, pooling) keep refreshes responsive when large documents contain many CSS variable decorations.
 - Workflows now emit performance traces and analyzer reports directly through maintainer commands for easier diagnostics.
 - WCAG accessibility summaries now display colored pass/fail icons, reposition format listings below accessibility details, and remove bullet markers for a cleaner layout shared by hover and status bar tooltips.
+- Updated test build workflow to clean compiled test output before recompilation, preventing stale compiled tests from polluting current test runs.
 
 ### Fixed
 - **HTML Double Swatches Eliminated**: Context-aware filtering prevents duplicate color swatches in `<style>` tags and inline `style=""` attributes
@@ -47,6 +48,40 @@ _Release date: to be announced._
 - File watcher delete events now remove CSS variables and classes from the registry immediately, eliminating ghost entries after files are renamed or removed.
 - Resolved stale cache scenarios through additional `ensureDocumentIndexed` guards so remapped documents re-parse only when versions change.
 - Tailwind, CSS variable, and literal color detections remain aligned after fixture migrations, preventing regressions when swapping sample assets.
+- Resolved duplicate literal swatches in HTML documents by suppressing HTML literal document colors in ColorBuddy where native providers already render them.
+- Fixed Tailwind compact HSL false-positive matching inside decimal-hue `hsl(...)` expressions.
+- Added regression tests for HTML duplicate swatches and decimal-hue fragment detection.
+
+### Notes
+- Feature + bugfix release.
+- No breaking changes.
+
+
+## [0.0.5] - 2026-07-01
+
+### Changed
+- Optimized release packaging by tightening `.vscodeignore` exclusions.
+- Removed development-only artifacts from VSIX output (logs, benchmarks, graphics scratch assets, test fixtures, and internal documentation).
+
+### Added
+- Published refreshed release artifact for `v0.0.5` with reduced package footprint.
+
+### Notes
+- No runtime feature changes.
+- No breaking changes.
+
+
+## [0.0.4] - 2026-07-01
+
+### Fixed
+- Improved handling of CSS/PostCSS files in remapped language configurations.
+- Resolved stale registry entries during file watcher create/change/delete flows.
+- Reduced stale color/index state by tightening refresh and indexing behavior.
+- Hardened reliability with expanded integration test coverage for watcher and language scenarios.
+
+### Notes
+- Bugfix/stability release.
+- No breaking changes.
 
 ### Removed
 - **Telemetry Code**: All telemetry infrastructure, .env configuration, and related dependencies removed; extension now ships without any data collection capabilities

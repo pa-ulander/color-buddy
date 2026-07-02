@@ -42,6 +42,8 @@ Click the ColorBuddy icon in the Activity Bar at any time to revisit the latest 
 *   RGB / RGBA: `rgb(255, 0, 0)`, `rgba(255, 0, 0, 0.5)`
 *   HSL / HSLA: `hsl(0 100% 50%)`, `hsla(0 100% 50% / 0.5)`
 *   Tailwind compact HSL: `0 100% 50%`, `0 100% 50% / 0.5`
+*   OKLAB: `oklab(0.627 0.224 0.125)`, `oklab(0.627 0.224 0.125 / 0.5)`
+*   OKLCH: `oklch(0.627 0.224 0.125)`, `oklch(0.627 0.224 0.125 / 0.5)`
 
 ## Configuration
 
