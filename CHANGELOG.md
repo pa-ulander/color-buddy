@@ -3,7 +3,7 @@
 All notable changes to the **ColorBuddy** extension will be documented in this file.
 
 
-## [0.0.6] - 2026-07-01
+## [0.0.6] - 2026-07-02
 
 ### Added
 - Added support for CSS `oklab(...)` and `oklch(...)` detection, parsing, and formatting.
