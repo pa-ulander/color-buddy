@@ -23,6 +23,7 @@ async function setupControllerWithCapturedProvider(): Promise<{
 
 	const commandsNs = vscode.commands as unknown as { registerCommand: typeof vscode.commands.registerCommand };
 	const workspaceNs = vscode.workspace as unknown as { createFileSystemWatcher: typeof vscode.workspace.createFileSystemWatcher };
+	const windowNs = vscode.window as unknown as { registerWebviewViewProvider: typeof vscode.window.registerWebviewViewProvider };
 	const languagesNs = vscode.languages as unknown as {
 		registerHoverProvider: typeof vscode.languages.registerHoverProvider;
 		registerColorProvider: typeof vscode.languages.registerColorProvider;
@@ -30,6 +31,7 @@ async function setupControllerWithCapturedProvider(): Promise<{
 
 	const origRegisterCommand = commandsNs.registerCommand;
 	const origCreateWatcher = workspaceNs.createFileSystemWatcher;
+	const origRegisterViewProvider = windowNs.registerWebviewViewProvider;
 	const origRegisterHover = languagesNs.registerHoverProvider;
 	const origRegisterColor = languagesNs.registerColorProvider;
 
@@ -43,6 +45,7 @@ async function setupControllerWithCapturedProvider(): Promise<{
 		ignoreCreateEvents: false,
 		ignoreDeleteEvents: false
 	})) as typeof vscode.workspace.createFileSystemWatcher;
+	windowNs.registerWebviewViewProvider = ((_viewId: string, _provider: vscode.WebviewViewProvider) => createDisposable()) as typeof vscode.window.registerWebviewViewProvider;
 	languagesNs.registerHoverProvider = ((_sel: unknown, _prov: unknown) => createDisposable()) as typeof vscode.languages.registerHoverProvider;
 	languagesNs.registerColorProvider = ((_sel: unknown, provider: vscode.DocumentColorProvider) => {
 		capturedColorProvider = provider;
@@ -60,6 +63,7 @@ async function setupControllerWithCapturedProvider(): Promise<{
 		cleanup: () => {
 			commandsNs.registerCommand = origRegisterCommand;
 			workspaceNs.createFileSystemWatcher = origCreateWatcher;
+			windowNs.registerWebviewViewProvider = origRegisterViewProvider;
 			languagesNs.registerHoverProvider = origRegisterHover;
 			languagesNs.registerColorProvider = origRegisterColor;
 			controller.dispose();
