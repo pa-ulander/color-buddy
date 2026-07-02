@@ -44,6 +44,47 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "colorbuddy",
+          "title": "ColorBuddy",
+          "icon": "media/colorbuddy-palette-white6.svg"
+        }
+      ]
+    },
+    "views": {
+      "colorbuddy": [
+        {
+          "id": "colorbuddy.accessibilitySummary",
+          "name": "Accessibility summary",
+          "type": "webview",
+          "contextualTitle": "ColorBuddy Accessibility Summary",
+          "icon": "media/colorbuddy-palette-white6.svg"
+        },
+        {
+          "id": "colorbuddy.accessibilityContrast",
+          "name": "WCAG test results",
+          "type": "webview",
+          "contextualTitle": "ColorBuddy Accessibility WCAG Checks",
+          "icon": "media/colorbuddy-palette-white6.svg"
+        },
+        {
+          "id": "colorbuddy.accessibilityContexts",
+          "name": "Find usages",
+          "type": "webview",
+          "contextualTitle": "ColorBuddy Find Usages",
+          "icon": "media/colorbuddy-palette-white6.svg"
+        },
+        {
+          "id": "colorbuddy.accessibilityFormats",
+          "name": "Format conversions",
+          "type": "webview",
+          "contextualTitle": "ColorBuddy Color Format Conversions",
+          "icon": "media/colorbuddy-palette-white6.svg"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "colorbuddy.reindexCSSFiles",
@@ -136,21 +177,31 @@
             "graphql"
           ]
         },
+        "colorbuddy.searchExcludePatterns": {
+          "type": "array",
+          "description": "Glob patterns to exclude when searching for color usages. Common build/dependency folders are excluded by default.",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/node_modules/**",
+            "**/dist/**",
+            "**/out/**",
+            "**/build/**",
+            "**/.git/**",
+            "**/coverage/**",
+            "**/.vscode-test/**",
+            "**/vendor/**",
+            "**/storage/**",
+            "**/tmp/**",
+            "**/temp/**",
+            "**/cache/**"
+          ]
+        },
         "colorbuddy.enablePerformanceLogging": {
           "type": "boolean",
           "description": "Enable detailed performance logging for diagnostics. Logs timing information for indexing, caching, and hover operations to the Output panel.",
           "default": false
-        },
-        "colorbuddy.enableTelemetry": {
-          "type": "boolean",
-          "description": "Allow ColorBuddy to collect anonymous quick action usage telemetry. Disabled by default.",
-          "default": false
-        },
-        "colorbuddy.telemetryBatchSize": {
-          "type": "number",
-          "description": "Number of telemetry events to batch before sending to the endpoint.",
-          "default": 20,
-          "minimum": 1
         }
       }
     }
@@ -184,8 +235,8 @@
     "webpack-cli": "^6.0.1"
   },
   "dependencies": {
-    "@vscode/l10n": "^0.0.18",
-    "dotenv": "^16.4.5"
+    "@vscode/codicons": "^0.0.44",
+    "@vscode/l10n": "^0.0.18"
   },
   "overrides": {
     "diff": "^8.0.3",

@@ -19,7 +19,6 @@ import {
 	ExtensionController
 } from '../services';
 import { collectFormatConversions } from '../utils/colorFormatConversions';
-import { Telemetry, QuickActionTelemetryEvent, ColorInsightTelemetryEvent } from '../services/telemetry';
 import { DEFAULT_LANGUAGES } from '../types';
 import type { AccessibilityReport } from '../types';
 import { t, LocalizedStrings } from '../l10n/localization';
@@ -61,8 +60,8 @@ suite('Format helpers', () => {
 	test('format priorities stay deduplicated and include fallbacks', () => {
 		const priority = colorParser.getFormatPriority('hex');
 		assert.strictEqual(priority[0], 'hex');
-		assert.strictEqual(priority[1], 'rgba');
-		assert.ok(priority.includes('tailwind'));
+		assert.strictEqual(priority[1], 'tailwind'); // tailwind is first fallback
+		assert.ok(priority.includes('rgba'));
 		const unique = new Set(priority);
 		assert.strictEqual(unique.size, priority.length);
 	});
@@ -228,10 +227,11 @@ suite('Default language literal pipeline', () => {
 			assert.ok(/Contrast on white \([\d\.]+:1\)/.test(hoverContents.value), `hover should surface contrast ratio details for ${language}`);
 			assert.ok(hoverContents.value.includes(t(LocalizedStrings.COMMAND_QUICK_ACTIONS_TITLE)), `hover should include quick actions heading for ${language}`);
 			assert.ok(hoverContents.value.includes('command:colorbuddy.executeQuickAction'), `hover should route quick actions through execute command for ${language}`);
-			const hoverLinkMatch = hoverContents.value.match(/command:colorbuddy\.executeQuickAction\?([^"\)\]]+)/);
+			const hoverLinkMatch = hoverContents.value.match(/command:colorbuddy\.executeQuickAction\?([^\s"]+)/);
 			assertDefined(hoverLinkMatch, `expected quick action link payload for ${language}`);
 			const hoverPayload = JSON.parse(decodeURIComponent(hoverLinkMatch![1]));
-			assert.strictEqual(hoverPayload.target, 'colorbuddy.copyColorAs', `hover quick action should target copy command for ${language}`);
+			// First quick action is now "Display summary" (testColorAccessibility), changed in Session 53
+			assert.strictEqual(hoverPayload.target, 'colorbuddy.testColorAccessibility', `hover quick action should target accessibility command for ${language}`);
 			assert.strictEqual(hoverPayload.source, 'hover', `hover quick action should mark hover surface for ${language}`);
 			assert.ok(hoverContents.value.includes('colorbuddy.findColorUsages'), `hover quick actions should include find usages for ${language}`);
 			assert.ok(hoverContents.value.includes('colorbuddy.showColorPalette'), `hover quick actions should include palette for ${language}`);
@@ -274,10 +274,11 @@ suite('Default language literal pipeline', () => {
 				assert.ok(tooltip.value.includes('command:colorbuddy.copyColorAs?'), 'status bar tooltip should include copy command link');
 				assert.ok(tooltip.value.includes(t(LocalizedStrings.COMMAND_QUICK_ACTIONS_TITLE)), 'status bar tooltip should include quick actions header');
 				assert.ok(tooltip.value.includes('command:colorbuddy.executeQuickAction'), 'status bar quick actions should route through execute command');
-				const linkMatch = tooltip.value.match(/command:colorbuddy\.executeQuickAction\?([^"\)\]]+)/);
+				const linkMatch = tooltip.value.match(/command:colorbuddy\.executeQuickAction\?([^\s"]+)/);
 				assertDefined(linkMatch, 'status bar quick action payload should be present');
 				const payload = JSON.parse(decodeURIComponent(linkMatch![1]));
-				assert.strictEqual(payload.target, 'colorbuddy.copyColorAs', 'status bar quick action should include copy command link');
+				// First quick action is now "Display summary" (testColorAccessibility), changed in Session 53
+				assert.strictEqual(payload.target, 'colorbuddy.testColorAccessibility', 'status bar quick action should include accessibility command link');
 				assert.strictEqual(payload.source, 'statusBar', 'status bar quick action payload should mark the surface');
 				assert.ok(tooltip.value.includes('colorbuddy.findColorUsages'), 'status bar quick actions should include find usages command');
 				assert.ok(tooltip.value.includes('colorbuddy.showColorPalette'), 'status bar quick actions should include palette command');
@@ -290,6 +291,32 @@ suite('Default language literal pipeline', () => {
 	});
 
 	suite('Quick action payload values', () => {
+		test('hover convert action uses hover context for payload', async () => {
+			const document = createMockDocument('body { color: #abcdef; }', 'css');
+			const colorData = colorDetector.collectColorData(document, document.getText());
+			const literal = colorData.find(data => document.getText(data.range) === '#abcdef');
+			assertDefined(literal, 'expected literal color data for hover payload test');
+
+			const hover = await provider.provideHover(colorData, literal.range.start);
+			assertDefined(hover, 'expected hover result when building convert payload');
+			const hoverMarkdown = hover!.contents[0] as vscode.MarkdownString;
+			const payloads = extractQuickActionPayloads(hoverMarkdown);
+			const convertPayload = payloads.find(payload => payload.target === 'colorbuddy.convertColorFormat');
+			assertDefined(convertPayload, 'expected convert quick action payload');
+			assert.ok(Array.isArray(convertPayload!.args), 'expected convert quick action args array');
+			const payloadArg = convertPayload!.args[0];
+			assert.strictEqual(payloadArg.uri, document.uri.toString(), 'convert payload should point to the hovered document');
+			assert.deepStrictEqual(
+				payloadArg.range,
+				{
+					start: { line: literal.range.start.line, character: literal.range.start.character },
+					end: { line: literal.range.end.line, character: literal.range.end.character }
+				},
+				'convert payload should encode the hovered range'
+			);
+			assert.ok(typeof payloadArg.normalizedColor === 'string' && payloadArg.normalizedColor.length > 0, 'convert payload should include normalized color text');
+		});
+
 		test('hover copy action uses CSS variable declaration value', async () => {
 			registry.clear();
 			const variableUri = vscode.Uri.parse('file:///workspace/palette.css');
@@ -315,6 +342,25 @@ suite('Default language literal pipeline', () => {
 			assert.ok(Array.isArray(copyPayload!.args), 'expected quick action args to exist');
 			const payloadArg = copyPayload!.args[0];
 			assert.strictEqual(payloadArg.value, '12 76% 61%', 'copy payload should include raw CSS variable value');
+		});
+
+		test('hover accessibility action includes normalized color value', async () => {
+			const document = createMockDocument('body { color: #123456; }', 'css');
+			const colorData = colorDetector.collectColorData(document, document.getText());
+			const literalColor = colorData.find(data => data.originalText.includes('#123456'));
+			assertDefined(literalColor, 'expected literal color data');
+
+			const hover = await provider.provideHover(colorData, literalColor.range.start);
+			assertDefined(hover, 'expected hover for literal color');
+			const hoverMarkdown = hover!.contents[0] as vscode.MarkdownString;
+			const payloads = extractQuickActionPayloads(hoverMarkdown);
+			const accessibilityPayload = payloads.find(payload => payload.target === 'colorbuddy.testColorAccessibility');
+			assertDefined(accessibilityPayload, 'expected hover accessibility payload');
+			const payloadArg = accessibilityPayload!.args?.[0];
+			assertDefined(payloadArg, 'expected hover accessibility payload args');
+			assert.strictEqual(payloadArg.value, literalColor.normalizedColor, 'accessibility payload should include normalized color value');
+			assert.strictEqual(payloadArg.label, literalColor.originalText, 'accessibility payload should describe the original text');
+			assert.strictEqual(accessibilityPayload!.source, 'hover', 'hover payload should mark hover surface');
 		});
 
 		test('status bar copy action uses CSS variable declaration value', () => {
@@ -376,106 +422,106 @@ suite('Default language literal pipeline', () => {
 				restoreConfig();
 			}
 		});
-	});
 
-	suite('Quick action command', () => {
-		test('tracks quick action telemetry when opt-in is enabled', async () => {
-			const restoreConfig = stubWorkspaceLanguages(['plaintext'], { enableTelemetry: true });
-			const events: QuickActionTelemetryEvent[] = [];
-			const telemetry = new Telemetry({ onQuickActionRecorded: event => events.push(event) });
-			const controller = new ExtensionController({ subscriptions: [] } as unknown as vscode.ExtensionContext, { telemetry });
-			const restoreCommand = stubExecuteCommand(undefined);
+		test('status bar accessibility action includes normalized color value', () => {
+			const restoreConfig = stubWorkspaceLanguages(['css']);
+			const controller = new ExtensionController({ subscriptions: [] } as unknown as vscode.ExtensionContext);
 			try {
-				const executeQuickAction = (controller as unknown as {
-					handleExecuteQuickActionCommand(payload?: any): Promise<void>;
-				}).handleExecuteQuickActionCommand.bind(controller);
-				await executeQuickAction({ target: 'colorbuddy.copyColorAs', source: 'hover' });
-				assert.strictEqual(events.length, 1, 'telemetry should record quick action when enabled');
-				assert.strictEqual(events[0].target, 'colorbuddy.copyColorAs');
-				assert.strictEqual(events[0].source, 'hover');
-			} finally {
-				restoreCommand();
-				controller.dispose();
-				restoreConfig();
-			}
-		});
-
-		test('does not record telemetry when opt-in is disabled', async () => {
-			const restoreConfig = stubWorkspaceLanguages(['plaintext'], { enableTelemetry: false });
-			const events: QuickActionTelemetryEvent[] = [];
-			const telemetry = new Telemetry({ onQuickActionRecorded: event => events.push(event) });
-			const controller = new ExtensionController({ subscriptions: [] } as unknown as vscode.ExtensionContext, { telemetry });
-			const restoreCommand = stubExecuteCommand(undefined);
-			try {
-				const executeQuickAction = (controller as unknown as {
-					handleExecuteQuickActionCommand(payload?: any): Promise<void>;
-				}).handleExecuteQuickActionCommand.bind(controller);
-				await executeQuickAction({ target: 'colorbuddy.copyColorAs', source: 'statusBar' });
-				assert.strictEqual(events.length, 0, 'telemetry should remain silent when disabled');
-			} finally {
-				restoreCommand();
-				controller.dispose();
-				restoreConfig();
-			}
-		});
-	});
-
-	suite('Color insight telemetry', () => {
-		test('hover emits metrics when telemetry is enabled', async () => {
-			const restoreConfig = stubWorkspaceLanguages(['plaintext'], { enableTelemetry: true });
-			const events: ColorInsightTelemetryEvent[] = [];
-			const telemetry = new Telemetry({ onColorInsightRecorded: event => events.push(event) });
-			const instrumentedProvider = new Provider(registry, colorParser, colorFormatter, cssParser, telemetry);
-			try {
-				const document = createMockDocument('#123456', 'plaintext');
+				const document = createMockDocument('div { color: #abcdef; }', 'css');
 				const colorData = colorDetector.collectColorData(document, document.getText());
-				const hover = await instrumentedProvider.provideHover(colorData, colorData[0].range.start);
-				assertDefined(hover, 'expected hover result');
-				assert.strictEqual(events.length, 1, 'telemetry should record hover metrics');
-				assert.strictEqual(events[0].surface, 'hover');
-				assert.strictEqual(events[0].colorKind, 'literal');
-				assert.strictEqual(events[0].usageCount, 1);
-				assert.strictEqual(events[0].contrast.length, 2);
-			} finally {
-				restoreConfig();
-			}
-		});
+				const literal = colorData[0];
+				const providerInstance = (controller as unknown as { provider: Provider }).provider;
+				const report = providerInstance.getAccessibilityReport(literal.vscodeColor);
+				const contrastMetrics = (controller as unknown as {
+					extractContrastMetrics(report: AccessibilityReport): { contrastWhite?: any; contrastBlack?: any };
+				}).extractContrastMetrics.call(controller, report);
+				const conversions = collectFormatConversions(colorParser, colorFormatter, literal.vscodeColor, literal.format);
+				const buildTooltip = (controller as unknown as {
+					buildStatusBarTooltip(
+						data: any,
+						primaryValue: string,
+						metrics: any,
+						report: AccessibilityReport,
+						conversions: any
+					): vscode.MarkdownString;
+				}).buildStatusBarTooltip.bind(controller);
+				const primaryValue = conversions[0]?.value ?? literal.normalizedColor;
+				const tooltip = buildTooltip(
+					literal,
+					primaryValue,
+					{
+						usageCount: 1,
+						contrastWhite: contrastMetrics.contrastWhite,
+						contrastBlack: contrastMetrics.contrastBlack
+					},
+					report,
+					conversions
+				);
 
-		test('status bar emits metrics when telemetry is enabled', () => {
-			const restoreConfig = stubWorkspaceLanguages(['plaintext'], { enableTelemetry: true });
-			const events: ColorInsightTelemetryEvent[] = [];
-			const telemetry = new Telemetry({ onColorInsightRecorded: event => events.push(event) });
-			const controller = new ExtensionController({ subscriptions: [] } as unknown as vscode.ExtensionContext, { telemetry });
-			try {
-				const document = createMockDocument('#abcdef', 'plaintext');
-				const colorData = colorDetector.collectColorData(document, document.getText());
-				assert.ok(colorData.length > 0, 'expected color data for status bar telemetry test');
-				const report = provider.getAccessibilityReport(colorData[0].vscodeColor);
-				const recordStatusTelemetry = (controller as unknown as {
-					recordStatusBarTelemetry(data: any, usageCount: number, report: AccessibilityReport): void;
-				}).recordStatusBarTelemetry.bind(controller);
-				recordStatusTelemetry(colorData[0], 1, report);
-				assert.strictEqual(events.length, 1, 'telemetry should record status bar metrics');
-				assert.strictEqual(events[0].surface, 'statusBar');
-				assert.strictEqual(events[0].usageCount, 1);
-				assert.strictEqual(events[0].contrast.length, 2);
+				const payloads = extractQuickActionPayloads(tooltip);
+				const accessibilityPayload = payloads.find(payload => payload.target === 'colorbuddy.testColorAccessibility');
+				assertDefined(accessibilityPayload, 'expected status bar accessibility payload');
+				const payloadArg = accessibilityPayload!.args?.[0];
+				assertDefined(payloadArg, 'expected status bar accessibility payload args');
+				assert.strictEqual(payloadArg.value, literal.normalizedColor, 'status bar accessibility payload should use normalized value');
+				assert.strictEqual(accessibilityPayload!.source, 'statusBar', 'status bar payload should mark status bar surface');
 			} finally {
 				controller.dispose();
 				restoreConfig();
 			}
 		});
 
-		test('color insight telemetry respects opt-out', async () => {
-			const restoreConfig = stubWorkspaceLanguages(['plaintext'], { enableTelemetry: false });
-			const events: ColorInsightTelemetryEvent[] = [];
-			const telemetry = new Telemetry({ onColorInsightRecorded: event => events.push(event) });
-			const instrumentedProvider = new Provider(registry, colorParser, colorFormatter, cssParser, telemetry);
+		test('status bar convert action encodes the active document range', () => {
+			const restoreConfig = stubWorkspaceLanguages(['plaintext']);
+			const controller = new ExtensionController({ subscriptions: [] } as unknown as vscode.ExtensionContext);
 			try {
-				const document = createMockDocument('#654321', 'plaintext');
+				const document = createMockDocument('body { color: #445566; }', 'plaintext');
 				const colorData = colorDetector.collectColorData(document, document.getText());
-				await instrumentedProvider.provideHover(colorData, colorData[0].range.start);
-				assert.strictEqual(events.length, 0, 'telemetry should stay silent when disabled');
+				const literal = colorData.find(data => document.getText(data.range) === '#445566');
+				assertDefined(literal, 'expected literal color for status bar convert payload test');
+				const providerInstance = (controller as unknown as { provider: Provider }).provider;
+				const report = providerInstance.getAccessibilityReport(literal.vscodeColor);
+				const contrastMetrics = (controller as unknown as {
+					extractContrastMetrics(report: AccessibilityReport): { contrastWhite?: any; contrastBlack?: any };
+				}).extractContrastMetrics.call(controller, report);
+				const conversions = collectFormatConversions(colorParser, colorFormatter, literal.vscodeColor, literal.format);
+				const buildTooltip = (controller as unknown as {
+					buildStatusBarTooltip(
+						data: any,
+						primaryValue: string,
+						metrics: any,
+						report: AccessibilityReport,
+						conversions: any
+					): vscode.MarkdownString;
+				}).buildStatusBarTooltip.bind(controller);
+				const tooltip = buildTooltip(
+					literal,
+					literal.normalizedColor,
+					{
+						usageCount: 1,
+						contrastWhite: contrastMetrics.contrastWhite,
+						contrastBlack: contrastMetrics.contrastBlack
+					},
+					report,
+					conversions
+				);
+
+				const payloads = extractQuickActionPayloads(tooltip);
+				const convertPayload = payloads.find(payload => payload.target === 'colorbuddy.convertColorFormat');
+				assertDefined(convertPayload, 'expected status bar convert payload');
+				const payloadArg = convertPayload!.args?.[0];
+				assertDefined(payloadArg, 'expected status bar convert payload argument');
+				assert.strictEqual(payloadArg.uri, document.uri.toString(), 'status bar convert payload should reference the document');
+				assert.deepStrictEqual(
+					payloadArg.range,
+					{
+						start: { line: literal.range.start.line, character: literal.range.start.character },
+						end: { line: literal.range.end.line, character: literal.range.end.character }
+					},
+					'convert payload should encode the literal range'
+				);
 			} finally {
+				controller.dispose();
 				restoreConfig();
 			}
 		});
@@ -538,9 +584,23 @@ suite('Cache behaviour', () => {
 });
 
 function extractQuickActionPayloads(markdown: vscode.MarkdownString): any[] {
-	const regex = /command:colorbuddy\.executeQuickAction\?([^"\)\]]+)/g;
-	const matches = markdown.value.matchAll(regex);
-	return Array.from(matches, match => JSON.parse(decodeURIComponent(match[1])));
+	const regex = /command:colorbuddy\.executeQuickAction\?([^\s\]]+)/g;
+	const payloads: any[] = [];
+	for (const match of markdown.value.matchAll(regex)) {
+		const encoded = match[1];
+		const decoded = decodeURIComponent(encoded).trim();
+		const closingBraceIndex = decoded.lastIndexOf('}');
+		if (closingBraceIndex === -1) {
+			throw new Error(`Failed to parse quick action payload: ${encoded}. Missing closing brace.`);
+		}
+		const jsonString = decoded.slice(0, closingBraceIndex + 1);
+		try {
+			payloads.push(JSON.parse(jsonString));
+		} catch (error) {
+			throw new Error(`Failed to parse quick action payload: ${encoded}. ${(error as Error).message}`);
+		}
+	}
+	return payloads;
 }
 
 function stubExecuteCommand<T>(result: T): () => void {
@@ -551,22 +611,12 @@ function stubExecuteCommand<T>(result: T): () => void {
 	};
 }
 
-interface WorkspaceConfigOverrides {
-	enableTelemetry?: boolean;
-}
-
-function stubWorkspaceLanguages(languages: string[], overrides?: WorkspaceConfigOverrides): () => void {
+function stubWorkspaceLanguages(languages: string[]): () => void {
 	const original = vscode.workspace.getConfiguration;
 	const config: vscode.WorkspaceConfiguration = {
 		get: <T>(section: string, defaultValue?: T) => {
 			if (section === 'languages') {
 				return languages as unknown as T;
-			}
-			if (section === 'enableTelemetry') {
-				if (typeof overrides?.enableTelemetry === 'boolean') {
-					return overrides.enableTelemetry as unknown as T;
-				}
-				return defaultValue as T;
 			}
 			return defaultValue as T;
 		},

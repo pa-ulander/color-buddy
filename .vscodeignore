@@ -2,6 +2,8 @@
 .vscode-test/**
 out/**
 node_modules/**
+!node_modules/@vscode/codicons/dist/**
+!node_modules/@vscode/l10n/dist/**
 src/**
 .gitignore
 .yarnrc
@@ -12,17 +14,30 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 **/.vscode-test.*
+
+# Exclude development/debugging files (CRITICAL for performance)
+.github/**
 logs/**
 benchmarks/**
+docs/**
 graphics/**
-test-fixtures/**
-.github/**
 bin/**
 scripts/**
-docs/**
+*.vsix
+test-fixtures/**
 .env*
 *.code-workspace
 **/.DS_Store
+
+# Exclude everything from node_modules except production dist folders
+node_modules/**/.github/**
+node_modules/**/test/**
+node_modules/**/tests/**
+node_modules/**/docs/**
+node_modules/**/*.md
+node_modules/**/.npmignore
+node_modules/**/.gitignore
+
 # Keep only necessary img files: icon and those referenced in README.md
 img/banner.png
 img/banner-2.png

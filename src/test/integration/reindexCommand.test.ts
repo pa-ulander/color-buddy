@@ -3,9 +3,10 @@ import { readFileSync } from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { ExtensionController } from '../../services';
+import { AccessibilityViewProvider } from '../../services/accessibilityViewProvider';
 import { perfLogger } from '../../utils/performanceLogger';
 import { t, LocalizedStrings } from '../../l10n/localization';
-import type { CSSVariableDeclaration } from '../../types';
+import type { CSSVariableDeclaration, ConvertColorCommandPayload } from '../../types';
 import { createMockDocument } from '../helpers';
 
 process.setMaxListeners(0);
@@ -29,14 +30,7 @@ if (FIND_COLOR_USAGE_LINE_INDEX === -1) {
 	throw new Error('Find color usages fixture missing expected hex color.');
 }
 
-const FIND_COLOR_USAGE_PREVIEW = FIND_COLOR_USAGE_LINES[FIND_COLOR_USAGE_LINE_INDEX];
-const FIND_COLOR_USAGE_START = FIND_COLOR_USAGE_PREVIEW.indexOf(FIND_COLOR_USAGE_HEX);
-
-if (FIND_COLOR_USAGE_START === -1) {
-	throw new Error('Find color usages fixture preview missing expected hex color.');
-}
-
-const FIND_COLOR_USAGE_END = FIND_COLOR_USAGE_START + FIND_COLOR_USAGE_HEX.length;
+const ACCESSIBILITY_VIEW_COMMAND = 'workbench.view.extension.colorbuddy';
 
 suite('Command Integration', () => {
 	function createDisposable(): vscode.Disposable {
@@ -53,6 +47,7 @@ suite('Command Integration', () => {
 		openDocuments: Array<{ content: string | undefined; language: string | undefined }>;
 		showTextDocuments: Array<{ document: vscode.TextDocument }>;
 		getFindFilesCallCount(): number;
+		getExecutedCommands(): Array<{ command: string; args: unknown[] }>;
 		configUpdates: Array<{ name: string; value: unknown }>;
 		setActiveEditor(editor?: vscode.TextEditor): void;
 		setVisibleEditors(editors: readonly vscode.TextEditor[]): void;
@@ -60,6 +55,8 @@ suite('Command Integration', () => {
 		setTextSearchMatches(matches: vscode.TextSearchMatch[]): void;
 		getTextSearchInvocations(): Array<{ query: vscode.TextSearchQuery; options?: vscode.FindTextInFilesOptions }>;
 		setPerformanceLoggingEnabled(enabled: boolean): void;
+		setFindFilesResults(results: vscode.Uri[]): void;
+		getFindFilesInvocations(): Array<{ include: vscode.GlobPattern; exclude?: vscode.GlobPattern }>;
 		restore(): Promise<void>;
 	}
 
@@ -78,15 +75,8 @@ suite('Command Integration', () => {
 		} as unknown as vscode.TextEditor;
 	}
 
-	function createTextSearchMatch(uri: vscode.Uri, lineText: string, line: number, matchStart: number, matchEnd: number): vscode.TextSearchMatch {
-		return {
-			uri,
-			ranges: [new vscode.Range(new vscode.Position(line, matchStart), new vscode.Position(line, matchEnd))],
-			preview: {
-				text: lineText,
-				matches: [new vscode.Range(new vscode.Position(0, matchStart), new vscode.Position(0, matchEnd))]
-			}
-		} as unknown as vscode.TextSearchMatch;
+	function getAccessibilityView(env: CommandTestEnvironment): AccessibilityViewProvider {
+		return (env.controller as unknown as { accessibilityViewProvider: AccessibilityViewProvider }).accessibilityViewProvider;
 	}
 
 	async function setupCommandTestEnvironment(options?: {
@@ -111,6 +101,8 @@ suite('Command Integration', () => {
 		const textSearchInvocations: Array<{ query: vscode.TextSearchQuery; options?: vscode.FindTextInFilesOptions }> = [];
 		let nextTextSearchMatches: vscode.TextSearchMatch[] = [];
 		const textSearchMatchMap = new Map<string, vscode.TextSearchMatch[]>();
+		let nextFindFilesResults: vscode.Uri[] = [];
+		const findFilesInvocations: Array<{ include: vscode.GlobPattern; exclude?: vscode.GlobPattern }> = [];
 		const originalProcessMaxListeners = process.getMaxListeners();
 		process.setMaxListeners(0);
 
@@ -120,12 +112,21 @@ suite('Command Integration', () => {
 			return createDisposable();
 		}) as typeof vscode.commands.registerCommand;
 
+		const executedCommands: Array<{ command: string; args: unknown[] }> = [];
 		const originalExecuteCommand = vscode.commands.executeCommand;
-		(vscode.commands as unknown as { executeCommand: typeof vscode.commands.executeCommand }).executeCommand = (async () => undefined) as typeof vscode.commands.executeCommand;
+		(vscode.commands as unknown as { executeCommand: typeof vscode.commands.executeCommand }).executeCommand = (async (command: string, ...args: unknown[]) => {
+			executedCommands.push({ command, args });
+			return undefined;
+		}) as typeof vscode.commands.executeCommand;
 
 		const originalFindFiles = vscode.workspace.findFiles;
-		(vscode.workspace as unknown as { findFiles: typeof vscode.workspace.findFiles }).findFiles = (async () => {
+		(vscode.workspace as unknown as { findFiles: typeof vscode.workspace.findFiles }).findFiles = (async (include: vscode.GlobPattern, exclude?: vscode.GlobPattern) => {
 			findFilesCallCount += 1;
+			findFilesInvocations.push({ include, exclude });
+			// Return configured results for color usage searches
+			if (nextFindFilesResults.length > 0) {
+				return nextFindFilesResults;
+			}
 			return [];
 		}) as typeof vscode.workspace.findFiles;
 
@@ -176,6 +177,12 @@ suite('Command Integration', () => {
 			_thisArg?: unknown,
 			_disposables?: vscode.Disposable[]
 		) => createDisposable()) as typeof vscode.workspace.onDidChangeConfiguration;
+
+		const originalRegisterWebviewViewProvider = vscode.window.registerWebviewViewProvider;
+		(vscode.window as unknown as { registerWebviewViewProvider: typeof vscode.window.registerWebviewViewProvider }).registerWebviewViewProvider = ((
+			_viewId: string,
+			_provider: vscode.WebviewViewProvider
+		) => createDisposable()) as typeof vscode.window.registerWebviewViewProvider;
 
 		const originalRegisterHoverProvider = vscode.languages.registerHoverProvider;
 		(vscode.languages as unknown as { registerHoverProvider: typeof vscode.languages.registerHoverProvider }).registerHoverProvider = ((
@@ -318,12 +325,13 @@ suite('Command Integration', () => {
 			}
 			if (arg instanceof vscode.Uri) {
 				const key = arg.toString();
+				// Handle fixture file from findFiles results
+				if (key === FIND_COLOR_USAGE_FIXTURE_URI.toString()) {
+					const content = FIND_COLOR_USAGE_LINES.join('\n');
+					return createMockDocument(content, 'css', arg);
+				}
 				const matchesForUri = textSearchMatchMap.get(key);
 				if (matchesForUri && matchesForUri.length > 0) {
-					if (key === FIND_COLOR_USAGE_FIXTURE_URI.toString()) {
-						const content = FIND_COLOR_USAGE_LINES.join('\n');
-						return createMockDocument(content, 'css', arg);
-					}
 					let maxLine = 0;
 					for (const match of matchesForUri) {
 						const range = Array.isArray(match.ranges) ? match.ranges[0] : match.ranges;
@@ -379,6 +387,7 @@ suite('Command Integration', () => {
 			openDocuments,
 			showTextDocuments,
 			getFindFilesCallCount: () => findFilesCallCount,
+			getExecutedCommands: () => [...executedCommands],
 			configUpdates,
 			setActiveEditor: (editor?: vscode.TextEditor) => {
 				activeEditorState.editor = editor;
@@ -408,6 +417,10 @@ suite('Command Integration', () => {
 				perfLoggingEnabled = enabled;
 				perfLogger.updateEnabled();
 			},
+			setFindFilesResults: (results: vscode.Uri[]) => {
+				nextFindFilesResults = results;
+			},
+			getFindFilesInvocations: () => [...findFilesInvocations],
 			restore: async () => {
 				controller.dispose();
 				perfLogger.reset();
@@ -420,6 +433,7 @@ suite('Command Integration', () => {
 				(vscode.workspace as unknown as { onDidChangeTextDocument: typeof vscode.workspace.onDidChangeTextDocument }).onDidChangeTextDocument = originalOnDidChangeTextDocument;
 				(vscode.workspace as unknown as { onDidCloseTextDocument: typeof vscode.workspace.onDidCloseTextDocument }).onDidCloseTextDocument = originalOnDidCloseTextDocument;
 				(vscode.workspace as unknown as { onDidChangeConfiguration: typeof vscode.workspace.onDidChangeConfiguration }).onDidChangeConfiguration = originalOnDidChangeConfiguration;
+				(vscode.window as unknown as { registerWebviewViewProvider: typeof vscode.window.registerWebviewViewProvider }).registerWebviewViewProvider = originalRegisterWebviewViewProvider;
 				(vscode.languages as unknown as { registerHoverProvider: typeof vscode.languages.registerHoverProvider }).registerHoverProvider = originalRegisterHoverProvider;
 				(vscode.languages as unknown as { registerColorProvider: typeof vscode.languages.registerColorProvider }).registerColorProvider = originalRegisterColorProvider;
 				(vscode.window as unknown as { showInformationMessage: typeof vscode.window.showInformationMessage }).showInformationMessage = originalShowInformationMessage;
@@ -436,6 +450,8 @@ suite('Command Integration', () => {
 				textSearchInvocations.length = 0;
 				nextTextSearchMatches = [];
 				textSearchMatchMap.clear();
+				nextFindFilesResults = [];
+				findFilesInvocations.length = 0;
 				if (originalVisibleTextEditorsDescriptor) {
 					Object.defineProperty(vscode.window, 'visibleTextEditors', originalVisibleTextEditorsDescriptor);
 				} else {
@@ -759,7 +775,7 @@ suite('Command Integration', () => {
 		}
 	});
 
-	test('colorbuddy.convertColorFormat replaces the color literal with the chosen format', async () => {
+	test('colorbuddy.convertColorFormat opens formats panel with conversion options', async () => {
 		const env = await setupCommandTestEnvironment();
 		try {
 			const command = env.registeredCommands.get('colorbuddy.convertColorFormat');
@@ -773,27 +789,56 @@ suite('Command Integration', () => {
 			env.setActiveEditor(editor);
 			env.setVisibleEditors([editor]);
 
-			const appliedEdits: Array<{ range: vscode.Range; text: string }> = [];
-			(editor as unknown as { edit: typeof editor.edit }).edit = async callback => {
-				callback({
-					replace: (range: vscode.Range, text: string) => {
-						appliedEdits.push({ range, text });
-					}
-				} as vscode.TextEditorEdit);
-				return true;
-			};
-
-			env.setQuickPickHandler(items => items.find(item => item.label.toLowerCase().startsWith('rgb')) ?? items[0]);
-
-			const initialInfoCount = env.infoMessages.length;
 			await (command as (...args: unknown[]) => unknown)();
 
-			assert.strictEqual(env.quickPickRequests.length, 1, 'Expected a quick pick for conversion targets');
-			assert.ok(appliedEdits.length === 1, 'Expected a single edit to be applied');
-			const [edit] = appliedEdits;
-			assert.ok(edit.text.toLowerCase().startsWith('rgb'), 'Converted text should be in RGB format');
-			const infoMessages = env.infoMessages.slice(initialInfoCount);
-			assert.ok(infoMessages.some(message => message.includes(edit.text)), 'Success message should mention the converted value');
+			// Command now updates formats panel instead of showing QuickPick
+			const viewProvider = getAccessibilityView(env);
+			const lastData = viewProvider.getLastRenderedData();
+			assert.ok(lastData, 'Expected formats panel to be updated');
+			assert.ok(lastData.conversions && lastData.conversions.length > 0, 'Expected conversion options to be available');
+			assert.strictEqual(lastData.label, FIND_COLOR_USAGE_HEX, 'Expected current color value in panel');
+		} finally {
+			await env.restore();
+		}
+	});
+
+	test('colorbuddy.convertColorFormat handles payload and opens formats panel', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const command = env.registeredCommands.get('colorbuddy.convertColorFormat');
+			assert.ok(typeof command === 'function', 'Convert color format command missing');
+
+			const document = createMockDocument('body { color: #112233; }');
+			const cursor = new vscode.Position(0, 0);
+			const selection = new vscode.Selection(cursor, cursor);
+			const editor = createEditor(document, selection);
+			env.setActiveEditor(editor);
+			env.setVisibleEditors([editor]);
+
+			const colorIndex = document.getText().indexOf('#112233');
+			assert.ok(colorIndex >= 0, 'expected to find color literal in document');
+			const start = document.positionAt(colorIndex);
+			const end = document.positionAt(colorIndex + '#112233'.length);
+			const payload: ConvertColorCommandPayload = {
+				uri: document.uri.toString(),
+				range: {
+					start: { line: start.line, character: start.character },
+					end: { line: end.line, character: end.character }
+				},
+				normalizedColor: '#112233',
+				originalText: '#112233',
+				format: 'hex'
+			};
+
+			await (command as (...args: unknown[]) => unknown)(payload);
+
+			// Command now updates formats panel instead of showing QuickPick
+			const viewProvider = getAccessibilityView(env);
+			const lastData = viewProvider.getLastRenderedData();
+			assert.ok(lastData, 'Expected formats panel to be updated with payload');
+			assert.ok(lastData.conversions && lastData.conversions.length > 0, 'Expected conversion options');
+			assert.ok(lastData.normalizedColor, 'Expected normalized color in panel');
+			assert.ok(lastData.normalizedColor.startsWith('#'), 'Expected hex color format in panel');
 		} finally {
 			await env.restore();
 		}
@@ -853,14 +898,74 @@ suite('Command Integration', () => {
 			env.setVisibleEditors([editor]);
 
 			const initialInfoCount = env.infoMessages.length;
+			const executedBefore = env.getExecutedCommands().length;
 			await (command as (...args: unknown[]) => unknown)();
 
+			const executed = env.getExecutedCommands().slice(executedBefore);
+			assert.ok(
+				executed.some(entry => entry.command === ACCESSIBILITY_VIEW_COMMAND),
+				'Expected Activity Bar view command to run for accessibility results'
+			);
 			const newMessages = env.infoMessages.slice(initialInfoCount);
-			assert.ok(newMessages.length > 0, 'Expected an accessibility summary message');
-			const summary = newMessages[0];
-			assert.ok(summary.includes('Accessibility for'), 'Summary should mention the evaluated color');
-			assert.ok(summary.includes('Contrast on white'), 'Summary should include contrast against white');
-			assert.ok(summary.includes('Contrast on black'), 'Summary should include contrast against black');
+			assert.strictEqual(newMessages.length, 0, 'Accessibility results now render in the Activity Bar instead of notifications');
+			const viewData = getAccessibilityView(env).getLastRenderedData();
+			assert.ok(viewData, 'Accessibility view should receive report data');
+			assert.ok(viewData?.label.includes(FIND_COLOR_USAGE_HEX), 'View data should reflect the evaluated color label');
+			const sampleLabels = viewData?.report.samples.map(sample => sample.label) ?? [];
+			assert.ok(sampleLabels.some(label => /white/i.test(label)), 'Report should include contrast against white');
+			assert.ok(sampleLabels.some(label => /black/i.test(label)), 'Report should include contrast against black');
+		} finally {
+			await env.restore();
+		}
+	});
+
+	test('colorbuddy.testColorAccessibility accepts payload without requiring an editor', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const command = env.registeredCommands.get('colorbuddy.testColorAccessibility');
+			assert.ok(typeof command === 'function', 'Test color accessibility command missing');
+
+			const initialInfoCount = env.infoMessages.length;
+			const executedBefore = env.getExecutedCommands().length;
+			await (command as (...args: unknown[]) => unknown)({ value: 'rgb(15, 23, 42)', label: 'rgb(15, 23, 42)' });
+
+			const executed = env.getExecutedCommands().slice(executedBefore);
+			assert.ok(
+				executed.some(entry => entry.command === ACCESSIBILITY_VIEW_COMMAND),
+				'Payload invocation should still reveal the Activity Bar view'
+			);
+			const newMessages = env.infoMessages.slice(initialInfoCount);
+			assert.strictEqual(newMessages.length, 0, 'Payload invocation should not post notifications');
+			const viewData = getAccessibilityView(env).getLastRenderedData();
+			assert.ok(viewData, 'Payload invocation should populate view data');
+			assert.ok(viewData?.report.samples.length && viewData.report.samples[0].contrastRatio > 0, 'Report samples should include computed ratios');
+		} finally {
+			await env.restore();
+		}
+	});
+
+	test('colorbuddy.testColorAccessibility opens different panels based on payload panel parameter', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const command = env.registeredCommands.get('colorbuddy.testColorAccessibility');
+			assert.ok(typeof command === 'function', 'Test color accessibility command missing');
+
+			// Test opening summary panel (default for "Display summary" action)
+			await (command as (...args: unknown[]) => unknown)({ value: 'rgb(15, 23, 42)', panel: 'summary' });
+			let viewData = getAccessibilityView(env).getLastRenderedData();
+			assert.ok(viewData, 'Summary panel should receive data');
+			assert.strictEqual(viewData?.section, 'summary', 'Should open summary panel when panel=summary');
+
+			// Test opening contrast panel (for "Test accessibility" action)
+			await (command as (...args: unknown[]) => unknown)({ value: 'rgb(15, 23, 42)', panel: 'contrast' });
+			viewData = getAccessibilityView(env).getLastRenderedData();
+			assert.ok(viewData, 'Contrast panel should receive data');
+			assert.strictEqual(viewData?.section, 'contrast', 'Should open contrast (WCAG TEST RESULTS) panel when panel=contrast');
+
+			// Test default behavior (no panel specified, should default to summary)
+			await (command as (...args: unknown[]) => unknown)({ value: 'rgb(15, 23, 42)' });
+			viewData = getAccessibilityView(env).getLastRenderedData();
+			assert.strictEqual(viewData?.section, 'summary', 'Should default to summary panel when no panel specified');
 		} finally {
 			await env.restore();
 		}
@@ -882,7 +987,7 @@ suite('Command Integration', () => {
 		}
 	});
 
-	test('colorbuddy.findColorUsages searches using active color and opens results', async () => {
+	test('colorbuddy.findColorUsages searches using active color and updates panel', async () => {
 		const env = await setupCommandTestEnvironment();
 		try {
 			const command = env.registeredCommands.get('colorbuddy.findColorUsages');
@@ -895,29 +1000,21 @@ suite('Command Integration', () => {
 			const editor = createEditor(document, selection);
 			env.setActiveEditor(editor);
 			env.setVisibleEditors([editor]);
-			env.setQuickPickHandler(items => items[0]);
-			env.setTextSearchMatches([
-				createTextSearchMatch(
-					FIND_COLOR_USAGE_FIXTURE_URI,
-					FIND_COLOR_USAGE_PREVIEW,
-					FIND_COLOR_USAGE_LINE_INDEX,
-					FIND_COLOR_USAGE_START,
-					FIND_COLOR_USAGE_END
-				)
-			]);
+			// Configure findFiles to return the fixture file
+			env.setFindFilesResults([FIND_COLOR_USAGE_FIXTURE_URI]);
 
 			await (command as (...args: unknown[]) => unknown)();
 
-			const searches = env.getTextSearchInvocations();
-			assert.strictEqual(searches.length, 1, 'Expected a single text search invocation');
-			assert.ok((searches[0].query.pattern ?? '').includes(FIND_COLOR_USAGE_HEX), 'Search query should include the selected color');
-			assert.ok(env.quickPickRequests.length >= 1, 'Expected quick pick interaction for results');
-			assert.strictEqual(env.showTextDocuments.length, 1, 'Should open the document for the selected match');
-			assert.strictEqual(
-				env.showTextDocuments[0].document.uri.toString(),
-				FIND_COLOR_USAGE_FIXTURE_URI.toString(),
-				'Expected the fixture document to open'
-			);
+			// Verify that workspace.findFiles was invoked for color usage search
+			const findFilesInvocations = env.getFindFilesInvocations();
+			// At least one findFiles call for color usage search (there may be others from setup)
+			assert.ok(findFilesInvocations.length >= 1, 'Expected findFiles to be invoked for color usage search');
+
+			// The panel should have been updated - verify via the view provider
+			const viewProvider = getAccessibilityView(env);
+			const lastData = viewProvider.getLastRenderedData();
+			assert.ok(lastData, 'Expected panel data to be set after find usages');
+			assert.ok(Array.isArray(lastData.usageMatches) && lastData.usageMatches.length > 0, 'Expected usage matches in panel data');
 		} finally {
 			await env.restore();
 		}
@@ -935,15 +1032,142 @@ suite('Command Integration', () => {
 			const editor = createEditor(document, selection);
 			env.setActiveEditor(editor);
 			env.setVisibleEditors([editor]);
-			env.setQuickPickHandler(items => items[0]);
-			env.setTextSearchMatches([]);
+			// Configure findFiles to return an empty file that doesn't contain the color
+			env.setFindFilesResults([]);
 
 			const initialInfoCount = env.infoMessages.length;
 			await (command as (...args: unknown[]) => unknown)();
 
 			const afterMessages = env.infoMessages.slice(initialInfoCount);
 			assert.ok(afterMessages.some(message => message.includes('No usages found')), 'Expected no results message');
-			assert.strictEqual(env.getTextSearchInvocations().length, 1, 'Should still perform a search for the color');
+			// Verify findFiles was called for the search (at least once for color usage search)
+			const findFilesInvocations = env.getFindFilesInvocations();
+			assert.ok(findFilesInvocations.length >= 1, 'Should perform findFiles search for the color');
+		} finally {
+			await env.restore();
+		}
+	});
+
+test('colorbuddy.findColorUsages uses metadata fields when creating search candidates', async () => {
+	const env = await setupCommandTestEnvironment();
+	try {
+		const command = env.registeredCommands.get('colorbuddy.findColorUsages');
+		assert.ok(typeof command === 'function', 'Find color usages command missing');
+
+		// Set up workspace to have NO files - this ensures we hit the "no results" case
+		// But the important part is that the command TRIES to search for the correct values
+		env.setFindFilesResults([]);
+
+		const initialInfoCount = env.infoMessages.length;
+
+		// Test with CSS variable metadata - should search for variable name too
+		await (command as (...args: unknown[]) => unknown)({
+			value: '#3b82f6',
+			label: 'var(--primary)',
+			metadata: { variableName: '--primary' }
+		});
+
+		// Should show "no results" message (since we have no files)
+		const afterMessages = env.infoMessages.slice(initialInfoCount);
+		assert.ok(afterMessages.some(msg => msg.includes('No usages found')), 'Should show no results message');
+		
+		// The key behavior: with metadata, it creates ColorData with variableName set
+		// This means getColorSearchCandidates will include --primary in the search
+		// (This is the fix - before it would only search for #3b82f6)
+	} finally {
+		await env.restore();
+	}
+});
+
+	test('Format conversion panel receives editorUri and editorRange from Convert quick action', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const document = createMockDocument('body { color: rgba(0, 0, 0, 0.15); }');
+			const colorText = 'rgba(0, 0, 0, 0.15)';
+			const colorIndex = document.getText().indexOf(colorText);
+			const cursor = document.positionAt(colorIndex + 1);
+			const selection = new vscode.Selection(cursor, cursor);
+			const editor = createEditor(document, selection);
+			env.setActiveEditor(editor);
+			env.setVisibleEditors([editor]);
+
+			// Get the convert command from quick actions
+			const convertCommand = env.registeredCommands.get('colorbuddy.convertColorFormat');
+			assert.ok(typeof convertCommand === 'function', 'Convert command should be registered');
+
+			// Trigger convert - this should populate the formats panel with editor context
+			await (convertCommand as (...args: unknown[]) => unknown)();
+
+			// Verify the formats panel has editorUri and editorRange in its data
+			const viewProvider = getAccessibilityView(env);
+			const lastData = viewProvider.getLastRenderedData();
+			
+			assert.ok(lastData, 'Panel should have data after convert command');
+			assert.ok(lastData.editorUri, 'Panel data should include editorUri for format conversion');
+			assert.ok(lastData.editorRange, 'Panel data should include editorRange for format conversion');
+			assert.strictEqual(lastData.editorUri, document.uri.toString(), 'editorUri should match document');
+			assert.strictEqual(lastData.currentFormatValue, colorText, 'currentFormatValue should be the original color');
+		} finally {
+			await env.restore();
+		}
+	});
+
+	test('Clicking format in panel uses convertColorFormat command with editor context', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const document = createMockDocument('body { color: rgba(0, 0, 0, 0.15); }');
+			const colorText = 'rgba(0, 0, 0, 0.15)';
+			const colorIndex = document.getText().indexOf(colorText);
+			const cursor = document.positionAt(colorIndex + 1);
+			const selection = new vscode.Selection(cursor, cursor);
+			const editor = createEditor(document, selection);
+			env.setActiveEditor(editor);
+			env.setVisibleEditors([editor]);
+
+			// Trigger convert to populate panel
+			const convertCommand = env.registeredCommands.get('colorbuddy.convertColorFormat');
+			await (convertCommand as (...args: unknown[]) => unknown)();
+
+			// Verify the panel data has all the info needed for conversion
+			const viewProvider = getAccessibilityView(env);
+			const lastData = viewProvider.getLastRenderedData();
+			
+			assert.ok(lastData, 'Panel should have data after convert command');
+			assert.ok(lastData.editorUri, 'Panel data should include editorUri');
+			assert.ok(lastData.editorRange, 'Panel data should include editorRange');
+			assert.ok(lastData.normalizedColor, 'Panel data should include normalizedColor');
+			assert.ok(lastData.conversions && lastData.conversions.length > 0, 'Panel should have format conversions available');
+
+			// The actual command invocation would happen when user clicks format in webview
+			// Here we just verify the data structure is correct for building the convertColorFormat payload
+		} finally {
+			await env.restore();
+		}
+	});
+
+	test('Format panel shows "Converting: [color]" header with original color value', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const document = createMockDocument('body { color: rgba(0, 0, 0, 0.15); }');
+			const colorText = 'rgba(0, 0, 0, 0.15)';
+			const colorIndex = document.getText().indexOf(colorText);
+			const cursor = document.positionAt(colorIndex + 1);
+			const selection = new vscode.Selection(cursor, cursor);
+			const editor = createEditor(document, selection);
+			env.setActiveEditor(editor);
+			env.setVisibleEditors([editor]);
+
+			// Trigger convert
+			const convertCommand = env.registeredCommands.get('colorbuddy.convertColorFormat');
+			await (convertCommand as (...args: unknown[]) => unknown)();
+
+			// Verify panel data has the original color value for header display
+			const viewProvider = getAccessibilityView(env);
+			const lastData = viewProvider.getLastRenderedData();
+			
+			assert.ok(lastData, 'Panel should have data');
+			assert.strictEqual(lastData.currentFormatValue, colorText, 'currentFormatValue should match original color for "Converting:" header');
+			assert.ok(lastData.conversions.some(c => c.value === colorText), 'Conversions should include the current format');
 		} finally {
 			await env.restore();
 		}

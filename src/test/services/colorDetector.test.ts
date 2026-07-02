@@ -470,12 +470,12 @@ suite('ColorDetector Service', () => {
             assert.strictEqual(results.length, 0);
         });
 
-        test('should detect colors in comments', () => {
-            const doc = createMockDocument('// color: #ff0000');
+        test('should NOT detect colors in comments', () => {
+            const doc = createMockDocument('// color: #ff0000\n/* color: rgb(255, 0, 0) */\n<!-- color: hsl(0, 100%, 50%) -->');
             const results = detector.collectColorData(doc, doc.getText());
             
-            // Detector doesn't parse comments, so it will detect the color
-            assert.strictEqual(results.length, 1);
+            // Detector now filters out colors in comments
+            assert.strictEqual(results.length, 0);
         });
     });
 });

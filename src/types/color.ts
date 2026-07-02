@@ -21,6 +21,9 @@ export interface ColorData {
     /** VS Code Color object for use with color picker */
     vscodeColor: vscode.Color;
 
+    /** URI of the document where this color was detected */
+    documentUri?: vscode.Uri;
+
     /** Original format detected for the color (when known) */
     format?: ColorFormat;
     

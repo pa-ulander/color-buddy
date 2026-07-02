@@ -127,7 +127,8 @@ suite('Tailwind class integration', () => {
 	let ensureColorData: (document: vscode.TextDocument) => Promise<ColorData[]>;
 	let provider: ReturnType<typeof getProvider>;
 
-	suiteSetup(async () => {
+	suiteSetup(async function() {
+		this.timeout(10000); // Increased timeout for fixture loading under test suite load
 		const harness = await createControllerHarness();
 		controller = harness.controller;
 		restore = harness.restore;

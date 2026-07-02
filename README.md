@@ -4,7 +4,7 @@
 
 ## ColorBuddy - Your VS Code Color Companion
 
-Adds color indicators and mouseover information anywhere a common color code is found in text or code. Find color definitions and navigate fast just like you are used to. Helps with theming or to manage cumbersome refactoring and accessability concerns. Finds definitions from CSS variables, Tailwind classes, and CSS class names with color properties. Plays nice together with other extensions.
+Adds color indicators and mouseover information anywhere a common color code is found in text or code. Find color definitions and navigate fast to definitions just like you are used to from your code. Helps with theming or to manage cumbersome refactoring and accessability concerns. Finds definitions from CSS variables, Tailwind classes, and CSS class names with color properties. Plays nice together with other extensions.
 
 ## Features
 *   **Inline color indicator** beside each detected color value
@@ -13,7 +13,7 @@ Adds color indicators and mouseover information anywhere a common color code is 
 *   **Configurable language support** via the `colorbuddy.languages` setting
 *   **Tailwind compact HSL support** in addition to hex, rgb/rgba, and hsl/hsla and more  
 *   **Lightweight and performant** with caching and efficient parsing
-*   **accessibility testing** with contrast ratio info in the hover tooltip
+*   **Accessibility testing** with contrast ratio info in the hover tooltip and a dedicated Activity Bar report view
 
 ![](img/screen1.png) 
  
@@ -23,7 +23,18 @@ Adds color indicators and mouseover information anywhere a common color code is 
 1.  Open any file in a language covered by `colorbuddy.languages` (defaults include CSS, HTML, JS/TS, Markdown, and more)
 2.  Look for the inline color indicator next to recognized color codes
 3.  Hover over the color swatch or code to open vscode's tooltip and display color details
-4.  When hovering a color definition, the tooltip will contain VS Codes colorpicker enchanced with color information.
+4.  Ctrl+click to quickly navigate to a color definition (if applicable)
+5.  When hovering a color definition, the tooltip will contain VS Codes colorpicker enchanced with color information.
+
+### Accessibility Report Panel
+
+Run `ColorBuddy: Test Color Accessibility` (or fire the quick action from any color hover) to open the ColorBuddy Activity Bar view. The new panel surfaces:
+
+* Detailed WCAG contrast checks against light and dark backgrounds
+* Color name, hex, and brightness metadata sourced from the hover insights
+* Alternate format conversions you can copy directly
+
+Click the ColorBuddy icon in the Activity Bar at any time to revisit the latest report.
 
 ## Supported Color Formats
 
@@ -78,6 +89,9 @@ Open VSCode and type `ctrl+p`, then type: `ext install PAUlander.colorbuddy`
 3.  Pick the downloaded/generated `.vsix` file and reload the editor when prompted.
 4.  Alternatively, install via CLI with `code --install-extension color-buddy-*.*.*.vsix`.
 
+
+## Disclaimer
+This extension are still in early development stages.  It adds color indicators and hover information, but might not cover all edge cases or color formats yet. Please report any issues or feature requests.
 
 ## License
 

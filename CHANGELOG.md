@@ -3,21 +3,54 @@
 All notable changes to the **ColorBuddy** extension will be documented in this file.
 
 
-## [0.0.6] - 2026-07-02
+## [0.0.61] - 2026-07-02
 
 ### Added
+- **"Display Summary" Quick Action**: New button added as first (leftmost) quick action in hover tooltips that opens the Accessibility Summary panel with complete color details
+- **Go-to-Definition Navigation**: Ctrl+click on CSS variables, Tailwind classes, and CSS classes now navigates to their definition locations. Underline appears on hover with Ctrl held (only when definition exists)
+- **Activity Bar Accessibility Panels**: Four dedicated webview panels (Summary, WCAG Test Results, Find Usages, Format Conversions) with native VS Code styling and command URI integration
+- **Find Color Usages**: Search workspace for all color format variations with results displayed in clickable panel showing file paths, line numbers, and code previews
+- **Command Palette Commands**:
+  - `Copy Color As...` - Copy active color in any supported format (hex, RGB, HSL, Tailwind)
+  - `Convert Color Format` - Replace color with different format inline
+  - `Test Color Accessibility` - View WCAG contrast ratios and compliance levels
+  - `Show Color Palette` - Browse all CSS variables/colors used in workspace
+  - `Find Color Usages` - Search workspace for all occurrences of a color
+- **Context-Aware Command Payloads**: All commands can be invoked from quick actions with pre-populated color data, eliminating need for cursor placement
+- **Rich Hover Tooltips**: Multi-format conversions, closest CSS color name, perceptual brightness percentage, usage counts, WCAG contrast ratios with pass/fail indicators
+- **Status Bar Integration**: Shows active color with format conversions, usage metrics, and WCAG summary in tooltip with full quick actions
+- **Color Insights**: Closest CSS named color and perceptual brightness (0-100%) displayed for all color types
+- PostCSS support: `.pcss`/`.postcss` documents are now indexed and exposed through ColorBuddy's hover and color provider pipelines, including custom language remaps.
+- Comprehensive fixture-driven coverage across the default language list, Tailwind utilities, and CSS variable scenarios to safeguard hover, decoration, and color picker behavior.
+- Watcher integration tests validating registry refresh on create/change events and cleanup on delete to prevent stale metadata.
+- Hover and status bar tooltips now surface codicon-based copy actions and shared CSS variable context swatches for consistent affordances across surfaces.
 - Added support for CSS `oklab(...)` and `oklch(...)` detection, parsing, and formatting.
 - Added optional alpha handling for OK color formats.
 - Added OKLCH hue unit parsing support (`deg`, `rad`, `grad`, `turn`).
 - Added integration/service test coverage for OKLab/OKLCH behavior.
 
+### Changed
+- **Improved Panel UX**: Accessibility panels no longer auto-open when selecting colors; panels open only via explicit quick action clicks
+- **HTML File Decoration Persistence**: Color swatches in HTML files now persist correctly across tab switches and extension activation events via 2-second refresh interval
+- **Quick Actions Reordered**: New order prioritizes most-used actions: Display summary · Copy · Convert · Test accessibility · Find usages · Show palette
+- **Quick Action Implementation**: All quick actions now use command URIs with embedded payloads, enabling one-click operations without cursor placement or active editor requirements
+- **Copyable Format Conversions**: All format conversion lists render as clickable command links with codicon clipboard buttons for instant copying
+- **Shared Usage Tracking**: Consolidated usage counting utility across hover tooltips and status bar for consistent color occurrence metrics
+- Native color provider deferral now keys off language identifiers while CSS parsing keys off file extensions, ensuring remapped Sass/SCSS/LESS/PostCSS documents retain ColorBuddy features without duplicating native pickers.
+- Decoration scheduler improvements (chunk yields, pooling) keep refreshes responsive when large documents contain many CSS variable decorations.
+- Workflows now emit performance traces and analyzer reports directly through maintainer commands for easier diagnostics.
+- WCAG accessibility summaries now display colored pass/fail icons, reposition format listings below accessibility details, and remove bullet markers for a cleaner layout shared by hover and status bar tooltips.
+- Updated test build workflow to clean compiled test output before recompilation, preventing stale compiled tests from polluting current test runs.
+
 ### Fixed
+- **HTML Double Swatches Eliminated**: Context-aware filtering prevents duplicate color swatches in `<style>` tags and inline `style=""` attributes
+- **Script Tag Colors Persist**: Literal colors in HTML `<script>` tags now maintain decorations even when other language extensions activate
+- File watcher delete events now remove CSS variables and classes from the registry immediately, eliminating ghost entries after files are renamed or removed.
+- Resolved stale cache scenarios through additional `ensureDocumentIndexed` guards so remapped documents re-parse only when versions change.
+- Tailwind, CSS variable, and literal color detections remain aligned after fixture migrations, preventing regressions when swapping sample assets.
 - Resolved duplicate literal swatches in HTML documents by suppressing HTML literal document colors in ColorBuddy where native providers already render them.
 - Fixed Tailwind compact HSL false-positive matching inside decimal-hue `hsl(...)` expressions.
 - Added regression tests for HTML duplicate swatches and decimal-hue fragment detection.
-
-### Changed
-- Updated test build workflow to clean compiled test output before recompilation, preventing stale compiled tests from polluting current test runs.
 
 ### Notes
 - Feature + bugfix release.
@@ -49,6 +82,9 @@ All notable changes to the **ColorBuddy** extension will be documented in this f
 ### Notes
 - Bugfix/stability release.
 - No breaking changes.
+
+### Removed
+- **Telemetry Code**: All telemetry infrastructure, .env configuration, and related dependencies removed; extension now ships without any data collection capabilities
 
 
 ## [0.0.3] - 2025-11-23

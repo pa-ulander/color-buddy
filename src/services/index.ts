@@ -12,4 +12,4 @@ export { ColorDetector } from './colorDetector';
 export { CSSParser } from './cssParser';
 export { Provider } from './provider';
 export { ExtensionController } from './extensionController';
-export { Telemetry } from './telemetry';
+export { AccessibilityViewProvider } from './accessibilityViewProvider';

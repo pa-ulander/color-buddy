@@ -36,7 +36,24 @@ export class ColorDetector {
         const results: ColorData[] = [];
         const seenRanges = new Set<string>();
 
+        // Build a list of comment ranges to exclude
+        const commentRanges = this.getCommentRanges(text);
+
+        const isInComment = (startIndex: number, length: number): boolean => {
+            const endIndex = startIndex + length;
+            return commentRanges.some(([start, end]) => 
+                (startIndex >= start && startIndex < end) ||
+                (endIndex > start && endIndex <= end) ||
+                (startIndex <= start && endIndex >= end)
+            );
+        };
+
         const pushMatch = (startIndex: number, matchText: string) => {
+            // Skip if inside a comment
+            if (isInComment(startIndex, matchText.length)) {
+                return;
+            }
+
             const range = new vscode.Range(
                 document.positionAt(startIndex),
                 document.positionAt(startIndex + matchText.length)
@@ -59,9 +76,25 @@ export class ColorDetector {
                 originalText: matchText,
                 normalizedColor: parsed.cssString,
                 vscodeColor: parsed.vscodeColor,
+                documentUri: document.uri,
                 format: parsed.formatPriority[0]
             });
         };
+
+        // Detect CSS variable declarations FIRST: --primary: 210 40% 98%;
+        // This must run before literal color detection to mark value ranges as seen
+        const varDeclarationRegex = ColorDetector.reset(ColorDetector.CSS_VAR_DECLARATION_REGEX);
+        let varDeclMatch: RegExpExecArray | null;
+        while ((varDeclMatch = varDeclarationRegex.exec(text)) !== null) {
+            this.collectCSSVariableDeclaration(
+                document,
+                varDeclMatch.index,
+                varDeclMatch[1],
+                varDeclMatch[2],
+                results,
+                seenRanges
+            );
+        }
 
         // Detect hex colors: #rgb, #rrggbb, #rrggbbaa
         const hexRegex = ColorDetector.reset(ColorDetector.HEX_COLOR_REGEX);
@@ -97,20 +130,6 @@ export class ColorDetector {
         let varInFuncMatch: RegExpExecArray | null;
         while ((varInFuncMatch = varInFuncRegex.exec(text)) !== null) {
             this.collectCSSVariableReference(document, varInFuncMatch.index, varInFuncMatch[0], varInFuncMatch[2], results, seenRanges, varInFuncMatch[1] as 'hsl' | 'hsla' | 'rgb' | 'rgba' | 'oklab' | 'oklch');
-        }
-
-        // Detect CSS variable declarations: --primary: 210 40% 98%;
-        const varDeclarationRegex = ColorDetector.reset(ColorDetector.CSS_VAR_DECLARATION_REGEX);
-        let varDeclMatch: RegExpExecArray | null;
-        while ((varDeclMatch = varDeclarationRegex.exec(text)) !== null) {
-            this.collectCSSVariableDeclaration(
-                document,
-                varDeclMatch.index,
-                varDeclMatch[1],
-                varDeclMatch[2],
-                results,
-                seenRanges
-            );
         }
 
         // Detect Tailwind color classes: bg-primary, text-accent, border-destructive, etc.
@@ -185,6 +204,7 @@ export class ColorDetector {
             originalText: fullMatch,
             normalizedColor: parsed.cssString,
             vscodeColor: parsed.vscodeColor,
+            documentUri: document.uri,
             isCssVariable: true,
             variableName: variableName,
             isWrappedInFunction: !!wrappingFunction,
@@ -245,6 +265,7 @@ export class ColorDetector {
             originalText: fullMatch,
             normalizedColor: parsed.cssString,
             vscodeColor: parsed.vscodeColor,
+            documentUri: document.uri,
             isTailwindClass: true,
             tailwindClass: fullMatch,
             isCssVariable: true,
@@ -295,6 +316,7 @@ export class ColorDetector {
             originalText: className,
             normalizedColor: parsed.cssString,
             vscodeColor: parsed.vscodeColor,
+            documentUri: document.uri,
             isCssClass: true,
             cssClassName: className,
             format: parsed.formatPriority[0]
@@ -368,11 +390,26 @@ export class ColorDetector {
 
         seenRanges.add(key);
 
+        // Mark the value portion as seen to prevent double detection
+        // The regex captures: (--var-name)\s*:\s*(value)
+        // So value starts after: startIndex + variableName.length + (colon + spaces)
+        // We can find the trimmed value's position within rawValue
+        const trimmedValueIndex = rawValue.indexOf(value);
+        if (trimmedValueIndex !== -1) {
+            const valueStartIndex = startIndex + variableName.length + trimmedValueIndex;
+            const valueRange = new vscode.Range(
+                document.positionAt(valueStartIndex),
+                document.positionAt(valueStartIndex + value.length)
+            );
+            seenRanges.add(this.rangeKey(valueRange));
+        }
+
         results.push({
             range,
             originalText: variableName,
             normalizedColor: parsed.cssString,
             vscodeColor: parsed.vscodeColor,
+            documentUri: document.uri,
             isCssVariable: true,
             variableName,
             isCssVariableDeclaration: true,
@@ -385,5 +422,34 @@ export class ColorDetector {
      */
     private rangeKey(range: vscode.Range): string {
         return `${range.start.line}:${range.start.character}-${range.end.line}:${range.end.character}`;
+    }
+
+    /**
+     * Find all comment ranges in the text (CSS, JS, HTML comments).
+     * Returns array of [startIndex, endIndex] tuples.
+     */
+    private getCommentRanges(text: string): Array<[number, number]> {
+        const ranges: Array<[number, number]> = [];
+
+        // CSS/JS multi-line comments: /* ... */
+        const multiLineCommentRegex = /\/\*[\s\S]*?\*\//g;
+        let match: RegExpExecArray | null;
+        while ((match = multiLineCommentRegex.exec(text)) !== null) {
+            ranges.push([match.index, match.index + match[0].length]);
+        }
+
+        // JS single-line comments: // ...
+        const singleLineCommentRegex = /\/\/.*/g;
+        while ((match = singleLineCommentRegex.exec(text)) !== null) {
+            ranges.push([match.index, match.index + match[0].length]);
+        }
+
+        // HTML comments: <!-- ... -->
+        const htmlCommentRegex = /<!--[\s\S]*?-->/g;
+        while ((match = htmlCommentRegex.exec(text)) !== null) {
+            ranges.push([match.index, match.index + match[0].length]);
+        }
+
+        return ranges;
     }
 }
