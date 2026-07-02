@@ -27,6 +27,11 @@ export interface ConvertColorCommandPayload {
 	originalText?: string;
 	format?: ColorFormat;
 	source?: ConvertColorCommandSource;
+	// Option 2: When converting at definition, this specifies which definition to target
+	targetDefinition?: {
+		uri: string;
+		line: number;
+	};
 }
 
 export interface TestAccessibilityCommandMetadata {
@@ -51,4 +56,5 @@ export interface FindUsagesCommandPayload {
 	source?: CopyColorCommandSource;
 	label?: string;
 	metadata?: TestAccessibilityCommandMetadata;
+	panel?: 'contexts' | 'formats';
 }

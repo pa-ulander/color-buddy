@@ -7,9 +7,16 @@
 Adds color indicators and mouseover information anywhere a common color code is found in text or code. Find color definitions and navigate fast to definitions just like you are used to from your code. Helps with theming or to manage cumbersome refactoring and accessability concerns. Finds definitions from CSS variables, Tailwind classes, and CSS class names with color properties. Plays nice together with other extensions.
 
 ## Features
+*   **Hover a color for a quick summary tooltip** Inside the tooltip, you can access quick actions. 
+      * **The following quick actions are available**:
+      * Display summary - displays a detailed summary of the color
+      * Find usages - searches the workspace for usages of the color
+      * Convert - gives you the option to convert between various formats in one or many occurances across your codebase, ie it is possible to perform a controlled bulk convert. Not limited to a single format. You may convert any occurrance to any format you want, so be careful.
+      * Test Accessibility - Run it to show accessability info.
+      * Show pallette - Displays an overview of all occuring colors and simplifies work with themes.
+
+*   **Quick jump** ctrl+click to quick jump to a color definition, works on CSS variables, Tw classes, CSS class names with color properties and so on...
 *   **Inline color indicator** beside each detected color value
-*   **Mouseover preview** that shows the selected color and instructions
-*   **Native VS Code color picker** available on click for supported values
 *   **Configurable language support** via the `colorbuddy.languages` setting
 *   **Tailwind compact HSL support** in addition to hex, rgb/rgba, and hsl/hsla and more  
 *   **Lightweight and performant** with caching and efficient parsing

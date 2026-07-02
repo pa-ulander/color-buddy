@@ -1,3 +1,5 @@
+.github/worklog.md
+.github/backlog.md
 .vscode-test/*
 !img
 dist
@@ -9,3 +11,6 @@ out
 src/backup
 .env
 graphics
+
+.github/backlog.md
+.github/worklog.md
