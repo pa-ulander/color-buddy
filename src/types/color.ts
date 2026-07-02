@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 /**
  * Represents color format types supported by the extension.
  */
-export type ColorFormat = 'hex' | 'hexAlpha' | 'rgb' | 'rgba' | 'hsl' | 'hsla' | 'tailwind';
+export type ColorFormat = 'hex' | 'hexAlpha' | 'rgb' | 'rgba' | 'hsl' | 'hsla' | 'tailwind' | 'oklab' | 'oklch';
 
 /**
  * Color data detected in a document with metadata.

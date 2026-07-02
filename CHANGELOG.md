@@ -3,6 +3,27 @@
 All notable changes to the **ColorBuddy** extension will be documented in this file.
 
 
+## [0.0.6] - 2026-07-01
+
+### Added
+- Added support for CSS `oklab(...)` and `oklch(...)` detection, parsing, and formatting.
+- Added optional alpha handling for OK color formats.
+- Added OKLCH hue unit parsing support (`deg`, `rad`, `grad`, `turn`).
+- Added integration/service test coverage for OKLab/OKLCH behavior.
+
+### Fixed
+- Resolved duplicate literal swatches in HTML documents by suppressing HTML literal document colors in ColorBuddy where native providers already render them.
+- Fixed Tailwind compact HSL false-positive matching inside decimal-hue `hsl(...)` expressions.
+- Added regression tests for HTML duplicate swatches and decimal-hue fragment detection.
+
+### Changed
+- Updated test build workflow to clean compiled test output before recompilation, preventing stale compiled tests from polluting current test runs.
+
+### Notes
+- Feature + bugfix release.
+- No breaking changes.
+
+
 ## [0.0.5] - 2026-07-01
 
 ### Changed

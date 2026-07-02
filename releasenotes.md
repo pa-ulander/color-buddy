@@ -1,5 +1,36 @@
 # ColorBuddy Release Notes
 
+## Version 0.0.6 - July 1, 2026
+
+### OKLab/OKLCH Support + Swatch Accuracy Fixes
+
+This release adds first-class support for modern CSS OK color functions and resolves duplicate or misplaced swatch cases reported in HTML workflows.
+
+### What Changed
+
+**New Color Format Coverage**
+- Added detection, parsing, and formatting support for `oklab(...)` and `oklch(...)` values.
+- Added support for optional alpha in OK formats.
+- Added OKLCH hue unit handling (`deg`, `rad`, `grad`, `turn`).
+- Added format labels for OKLab/OKLCH in UI format displays.
+
+**Duplicate Swatch Regression Fixes**
+- Prevented duplicate literal swatches in HTML by treating HTML literals as native-provider-managed in the document color provider flow.
+- Fixed a false-positive Tailwind compact HSL match inside decimal-hue `hsl(...)` expressions (for example, preventing fragment matches such as `13 100% 63.92%` inside `hsl(9.13 100% 63.92%)`).
+- Added dedicated regression tests for both scenarios.
+
+**Test Reliability Improvement**
+- Updated test compilation workflow to clean the compiled test output directory before compiling tests.
+- This removes stale compiled test files and ensures only current test sources are executed.
+
+### Why This Matters
+
+Design systems using modern CSS color spaces now get the same ColorBuddy experience as legacy formats, while HTML and decimal-HSL edge cases render cleanly without extra swatches. Test runs are also more trustworthy and deterministic.
+
+### Upgrading
+
+Update from the VS Code marketplace (or `code --install-extension`). No configuration changes are required.
+
 ## Version 0.0.5 - July 1, 2026
 
 ### Packaging Size Optimization
