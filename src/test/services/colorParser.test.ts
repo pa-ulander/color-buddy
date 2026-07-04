@@ -325,16 +325,16 @@ suite('ColorParser Service', () => {
             assert.strictEqual(parser.parseColor('   '), undefined);
         });
 
-        test('normalizes cssString to rgba format', () => {
+        test('preserves original hex format in cssString', () => {
             const result = parser.parseColor('#ff0000');
             assert.ok(result);
-            assert.strictEqual(result.cssString, 'rgb(255, 0, 0)');
+            assert.strictEqual(result.cssString, '#ff0000', 'cssString should preserve hex format');
         });
 
-        test('includes alpha in cssString when alpha < 1', () => {
+        test('preserves hex with alpha format in cssString', () => {
             const result = parser.parseColor('#ff000080');
             assert.ok(result);
-            assert.ok(result.cssString.startsWith('rgba('));
+            assert.strictEqual(result.cssString, '#ff000080', 'cssString should preserve hex with alpha');
         });
     });
 

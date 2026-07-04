@@ -6,7 +6,7 @@ import { ExtensionController } from '../../services';
 import { AccessibilityViewProvider } from '../../services/accessibilityViewProvider';
 import { perfLogger } from '../../utils/performanceLogger';
 import { t, LocalizedStrings } from '../../l10n/localization';
-import type { CSSVariableDeclaration, ConvertColorCommandPayload } from '../../types';
+import type { CSSVariableDeclaration, ConvertColorCommandPayload, ColorFormat } from '../../types';
 import { createMockDocument } from '../helpers';
 
 process.setMaxListeners(0);
@@ -31,6 +31,7 @@ if (FIND_COLOR_USAGE_LINE_INDEX === -1) {
 }
 
 const ACCESSIBILITY_VIEW_COMMAND = 'workbench.view.extension.colorbuddy';
+const ACCESSIBILITY_CONTRAST_FOCUS_COMMAND = 'colorbuddy.accessabilityTestResultPanel.focus';
 
 suite('Command Integration', () => {
 	function createDisposable(): vscode.Disposable {
@@ -68,7 +69,43 @@ suite('Command Integration', () => {
 			visibleRanges: [],
 			options: {},
 			viewColumn: vscode.ViewColumn.One,
-			edit: async () => true,
+			edit: async (callback: (editBuilder: vscode.TextEditorEdit) => void) => {
+				const edits: Array<{ range: vscode.Range; newText: string }> = [];
+				const builder: vscode.TextEditorEdit = {
+					replace: (range: vscode.Range, newText: string) => {
+						edits.push({ range, newText });
+					},
+					insert: (position: vscode.Position, newText: string) => {
+						edits.push({ range: new vscode.Range(position, position), newText });
+					},
+					delete: (range: vscode.Range) => {
+						edits.push({ range, newText: '' });
+					}
+				} as vscode.TextEditorEdit;
+
+				callback(builder);
+
+				// Apply edits from the end of the document backward to keep offsets stable
+				const normalizedEdits = edits
+					.map(edit => ({
+						start: document.offsetAt(edit.range.start),
+						end: document.offsetAt(edit.range.end),
+						text: edit.newText
+					}))
+					.sort((a, b) => b.start - a.start);
+
+				let updatedText = document.getText();
+				for (const edit of normalizedEdits) {
+					updatedText = `${updatedText.slice(0, edit.start)}${edit.text}${updatedText.slice(edit.end)}`;
+				}
+
+				const mutableDoc = document as unknown as { __updateText?: (next: string) => void };
+				if (mutableDoc.__updateText) {
+					mutableDoc.__updateText(updatedText);
+				}
+
+				return true;
+			},
 			insertSnippet: async () => true,
 			setDecorations: () => undefined,
 			revealRange: () => undefined
@@ -105,6 +142,22 @@ suite('Command Integration', () => {
 		const findFilesInvocations: Array<{ include: vscode.GlobPattern; exclude?: vscode.GlobPattern }> = [];
 		const originalProcessMaxListeners = process.getMaxListeners();
 		process.setMaxListeners(0);
+
+		// Mock workspace folders - use PROJECT_ROOT so fixture files are within workspace
+		const mockWorkspaceFolder: vscode.WorkspaceFolder = {
+			uri: vscode.Uri.file(PROJECT_ROOT),
+			name: 'colorbuddy',
+			index: 0
+		};
+		const originalWorkspaceFolders = vscode.workspace.workspaceFolders;
+		Object.defineProperty(vscode.workspace, 'workspaceFolders', {
+			configurable: true,
+			get: () => [mockWorkspaceFolder]
+		});
+		const originalGetWorkspaceFolder = vscode.workspace.getWorkspaceFolder;
+		(vscode.workspace as unknown as { getWorkspaceFolder: typeof vscode.workspace.getWorkspaceFolder }).getWorkspaceFolder = ((_uri: vscode.Uri) => {
+			return mockWorkspaceFolder;
+		}) as typeof vscode.workspace.getWorkspaceFolder;
 
 		const originalRegisterCommand = vscode.commands.registerCommand;
 		(vscode.commands as unknown as { registerCommand: typeof vscode.commands.registerCommand }).registerCommand = ((command: string, callback: (...args: unknown[]) => unknown) => {
@@ -428,6 +481,11 @@ suite('Command Integration', () => {
 				(vscode.commands as unknown as { executeCommand: typeof vscode.commands.executeCommand }).executeCommand = originalExecuteCommand;
 				(vscode.workspace as unknown as { findFiles: typeof vscode.workspace.findFiles }).findFiles = originalFindFiles;
 				(vscode.workspace as unknown as { createFileSystemWatcher: typeof vscode.workspace.createFileSystemWatcher }).createFileSystemWatcher = originalCreateFileSystemWatcher;
+				(vscode.workspace as unknown as { getWorkspaceFolder: typeof vscode.workspace.getWorkspaceFolder }).getWorkspaceFolder = originalGetWorkspaceFolder;
+				Object.defineProperty(vscode.workspace, 'workspaceFolders', {
+					configurable: true,
+					value: originalWorkspaceFolders
+				});
 				(vscode.window as unknown as { onDidChangeActiveTextEditor: typeof vscode.window.onDidChangeActiveTextEditor }).onDidChangeActiveTextEditor = originalOnDidChangeActiveTextEditor;
 				(vscode.window as unknown as { onDidChangeVisibleTextEditors: typeof vscode.window.onDidChangeVisibleTextEditors }).onDidChangeVisibleTextEditors = originalOnDidChangeVisibleTextEditors;
 				(vscode.workspace as unknown as { onDidChangeTextDocument: typeof vscode.workspace.onDidChangeTextDocument }).onDidChangeTextDocument = originalOnDidChangeTextDocument;
@@ -971,6 +1029,29 @@ suite('Command Integration', () => {
 		}
 	});
 
+	test('colorbuddy.testColorAccessibility focuses target panel when webview is unopened', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const command = env.registeredCommands.get('colorbuddy.testColorAccessibility');
+			assert.ok(typeof command === 'function', 'Test color accessibility command missing');
+
+			const executedBefore = env.getExecutedCommands().length;
+			await (command as (...args: unknown[]) => unknown)({ value: 'rgb(15, 23, 42)', panel: 'contrast' });
+
+			const executedCommands = env.getExecutedCommands().slice(executedBefore).map(entry => entry.command);
+			assert.ok(
+				executedCommands.includes(ACCESSIBILITY_VIEW_COMMAND),
+				'Should open ColorBuddy Activity Bar container when running accessibility command'
+			);
+			assert.ok(
+				executedCommands.includes(ACCESSIBILITY_CONTRAST_FOCUS_COMMAND),
+				'Should focus the contrast panel even if it has not been opened yet'
+			);
+		} finally {
+			await env.restore();
+		}
+	});
+
 	test('colorbuddy.findColorUsages reports when no color is available', async () => {
 		const env = await setupCommandTestEnvironment();
 		try {
@@ -1002,6 +1083,19 @@ suite('Command Integration', () => {
 			env.setVisibleEditors([editor]);
 			// Configure findFiles to return the fixture file
 			env.setFindFilesResults([FIND_COLOR_USAGE_FIXTURE_URI]);
+			
+			// Provide text search matches for the findTextInFiles callback
+			const matchRange = new vscode.Range(FIND_COLOR_USAGE_LINE_INDEX, 0, FIND_COLOR_USAGE_LINE_INDEX, 50);
+			env.setTextSearchMatches([
+				{
+					uri: FIND_COLOR_USAGE_FIXTURE_URI,
+					ranges: matchRange,
+					preview: {
+						text: FIND_COLOR_USAGE_LINES[FIND_COLOR_USAGE_LINE_INDEX],
+						matches: [matchRange]
+					}
+				} as vscode.TextSearchMatch
+			]);
 
 			await (command as (...args: unknown[]) => unknown)();
 
@@ -1057,6 +1151,14 @@ test('colorbuddy.findColorUsages uses metadata fields when creating search candi
 		// Set up workspace to have NO files - this ensures we hit the "no results" case
 		// But the important part is that the command TRIES to search for the correct values
 		env.setFindFilesResults([]);
+		
+		// Need an active editor for getActiveWorkspaceFolder() to work
+		const document = createMockDocument('body { color: #3b82f6; }');
+		const cursor = document.positionAt(0);
+		const selection = new vscode.Selection(cursor, cursor);
+		const editor = createEditor(document, selection);
+		env.setActiveEditor(editor);
+		env.setVisibleEditors([editor]);
 
 		const initialInfoCount = env.infoMessages.length;
 
@@ -1168,6 +1270,264 @@ test('colorbuddy.findColorUsages uses metadata fields when creating search candi
 			assert.ok(lastData, 'Panel should have data');
 			assert.strictEqual(lastData.currentFormatValue, colorText, 'currentFormatValue should match original color for "Converting:" header');
 			assert.ok(lastData.conversions.some(c => c.value === colorText), 'Conversions should include the current format');
+		} finally {
+			await env.restore();
+		}
+	});
+
+	test('Convert quick action shows all usage matches in formats panel', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const docText = 'body { color: #336699; background: #336699; }';
+			const document = createMockDocument(docText, 'css');
+			const firstColorIndex = docText.indexOf('#336699');
+			const secondColorIndex = docText.lastIndexOf('#336699');
+			const cursor = document.positionAt(firstColorIndex + 1);
+			const selection = new vscode.Selection(cursor, cursor);
+			const editor = createEditor(document, selection);
+			env.setActiveEditor(editor);
+			env.setVisibleEditors([editor]);
+
+			const firstRange = new vscode.Range(0, firstColorIndex, 0, firstColorIndex + '#336699'.length);
+			const secondRange = new vscode.Range(0, secondColorIndex, 0, secondColorIndex + '#336699'.length);
+			env.setTextSearchMatches([
+				{
+					uri: document.uri,
+					ranges: firstRange,
+					preview: {
+						text: docText,
+						matches: [firstRange]
+					}
+				} as vscode.TextSearchMatch,
+				{
+					uri: document.uri,
+					ranges: secondRange,
+					preview: {
+						text: docText,
+						matches: [secondRange]
+					}
+				} as vscode.TextSearchMatch
+			]);
+
+			const convertCommand = env.registeredCommands.get('colorbuddy.convertColorFormat');
+			assert.ok(typeof convertCommand === 'function', 'Convert command should be registered');
+
+			await (convertCommand as (...args: unknown[]) => unknown)();
+
+			const viewProvider = getAccessibilityView(env);
+			const lastData = viewProvider.getLastRenderedData();
+
+			assert.ok(lastData, 'Panel should have data after convert command');
+			assert.ok(lastData?.usageMatches && lastData.usageMatches.length === 2, 'Formats panel should include all usage matches');
+			assert.strictEqual(lastData?.usageMatches?.length, 2, 'Should surface both occurrences');
+		} finally {
+			await env.restore();
+		}
+	});
+
+	test('Convert icon click preserves usage matches order', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const docText = 'body { color: #336699; background: #336699; }';
+			const document = createMockDocument(docText, 'css');
+			const firstColorIndex = docText.indexOf('#336699');
+			const cursor = document.positionAt(firstColorIndex + 1);
+			const selection = new vscode.Selection(cursor, cursor);
+			const editor = createEditor(document, selection);
+			env.setActiveEditor(editor);
+			env.setVisibleEditors([editor]);
+
+			const firstRange = new vscode.Range(0, firstColorIndex, 0, firstColorIndex + '#336699'.length);
+			const secondColorIndex = docText.lastIndexOf('#336699');
+			const secondRange = new vscode.Range(0, secondColorIndex, 0, secondColorIndex + '#336699'.length);
+			
+			env.setTextSearchMatches([
+				{
+					uri: document.uri,
+					ranges: firstRange,
+					preview: { text: docText, matches: [firstRange] }
+				} as vscode.TextSearchMatch,
+				{
+					uri: document.uri,
+					ranges: secondRange,
+					preview: { text: docText, matches: [secondRange] }
+				} as vscode.TextSearchMatch
+			]);
+
+			const convertCommand = env.registeredCommands.get('colorbuddy.convertColorFormat');
+			assert.ok(typeof convertCommand === 'function', 'Convert command should be registered');
+
+			// First call - quick action (triggers search)
+			await (convertCommand as (...args: unknown[]) => unknown)();
+
+			const viewProvider = getAccessibilityView(env);
+			const firstData = viewProvider.getLastRenderedData();
+			assert.ok(firstData?.usageMatches, 'Expected usage matches from first call');
+			const firstMatchRanges = firstData.usageMatches.map(m => `${m.range.start.character}-${m.range.end.character}`);
+
+			// Second call - panel icon click with 'panel' source (should preserve order)
+			const panelPayload: ConvertColorCommandPayload = {
+				uri: document.uri.toString(),
+				range: {
+					start: { line: firstRange.start.line, character: firstRange.start.character },
+					end: { line: firstRange.end.line, character: firstRange.end.character }
+				},
+				normalizedColor: '#336699',
+				originalText: '#336699',
+				format: 'rgb' as ColorFormat,
+				source: 'panel' as const
+			};
+
+			await convertCommand(panelPayload);
+
+			const secondData = viewProvider.getLastRenderedData();
+			assert.ok(secondData?.usageMatches, 'Expected usage matches from second call');
+			const secondMatchRanges = secondData.usageMatches.map(m => `${m.range.start.character}-${m.range.end.character}`);
+
+			// Verify order is preserved (same ranges in same order)
+			assert.deepStrictEqual(secondMatchRanges, firstMatchRanges, 'Usage matches order should be preserved after icon click');
+		} finally {
+			await env.restore();
+		}
+	});
+
+	test('Panel conversion preserves semicolon and refreshes panel state', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const docText = 'body { color: rgb(255, 99, 71); }';
+			const colorText = 'rgb(255, 99, 71);';
+			const document = createMockDocument(docText, 'css');
+			const colorIndex = docText.indexOf('rgb');
+			const cursor = document.positionAt(colorIndex + 1);
+			const selection = new vscode.Selection(cursor, cursor);
+			const editor = createEditor(document, selection);
+			env.setActiveEditor(editor);
+			env.setVisibleEditors([editor]);
+
+			const rangeWithSemicolon = new vscode.Range(0, colorIndex, 0, colorIndex + colorText.length);
+			env.setTextSearchMatches([
+				{
+					uri: document.uri,
+					ranges: rangeWithSemicolon,
+					preview: { text: docText, matches: [rangeWithSemicolon] }
+				} as vscode.TextSearchMatch
+			]);
+
+			const convertCommand = env.registeredCommands.get('colorbuddy.convertColorFormat');
+			assert.ok(typeof convertCommand === 'function', 'Convert command should be registered');
+
+			// Populate formats panel and usage matches
+			await (convertCommand as (...args: unknown[]) => unknown)();
+
+			const viewProvider = getAccessibilityView(env);
+			const initialData = viewProvider.getLastRenderedData();
+			assert.ok(initialData?.usageMatches && initialData.usageMatches.length === 1, 'Panel should capture usage match');
+			const targetFormat = initialData!.conversions.find(c => c.format === 'hex')?.format ?? initialData!.conversions[0].format;
+
+			const payload: ConvertColorCommandPayload = {
+				uri: document.uri.toString(),
+				range: {
+					start: { line: rangeWithSemicolon.start.line, character: rangeWithSemicolon.start.character },
+					end: { line: rangeWithSemicolon.end.line, character: rangeWithSemicolon.end.character }
+				},
+				normalizedColor: initialData!.normalizedColor || colorText,
+				originalText: colorText,
+				format: targetFormat as ColorFormat,
+				source: 'panel'
+			};
+
+			await (convertCommand as (...args: unknown[]) => unknown)(payload);
+
+			const updatedText = document.getText();
+			assert.ok(updatedText.includes('#ff6347;'), 'Converted text should preserve semicolon');
+
+			const activeEditor = vscode.window.activeTextEditor;
+			assert.ok(activeEditor, 'Active editor should remain set');
+			const selectionText = activeEditor?.document.getText(activeEditor.selection) ?? '';
+			assert.strictEqual(selectionText, '#ff6347;', 'Selection should cover converted value');
+
+			const updatedData = viewProvider.getLastRenderedData();
+			assert.ok(updatedData, 'Panel data should refresh after conversion');
+			const updatedPreview = updatedData?.usageMatches?.[0]?.previewText || '';
+			assert.ok(updatedPreview.includes('#ff6347;'), 'Panel usage preview should reflect converted value');
+			assert.strictEqual(updatedData?.currentFormatValue, '#ff6347;', 'Panel current format should match converted value');
+		} finally {
+			await env.restore();
+		}
+	});
+
+	test('Find Usages and Convert return the same number of results', async () => {
+		const env = await setupCommandTestEnvironment();
+		try {
+			const docText = 'body { color: #336699; background: #336699; } .foo { color: #336699; }';
+			const document = createMockDocument(docText, 'css');
+			const firstColorIndex = docText.indexOf('#336699');
+			const cursor = document.positionAt(firstColorIndex + 1);
+			const selection = new vscode.Selection(cursor, cursor);
+			const editor = createEditor(document, selection);
+			env.setActiveEditor(editor);
+			env.setVisibleEditors([editor]);
+
+			// Set up find results (all 3 occurrences)
+			const firstRange = new vscode.Range(0, docText.indexOf('#336699'), 0, docText.indexOf('#336699') + '#336699'.length);
+			const secondRange = new vscode.Range(0, docText.indexOf('#336699', docText.indexOf('#336699') + 1), 0, docText.indexOf('#336699', docText.indexOf('#336699') + 1) + '#336699'.length);
+			const thirdRange = new vscode.Range(0, docText.lastIndexOf('#336699'), 0, docText.lastIndexOf('#336699') + '#336699'.length);
+			
+			env.setTextSearchMatches([
+				{
+					uri: document.uri,
+					ranges: firstRange,
+					preview: { text: docText, matches: [firstRange] }
+				} as vscode.TextSearchMatch,
+				{
+					uri: document.uri,
+					ranges: secondRange,
+					preview: { text: docText, matches: [secondRange] }
+				} as vscode.TextSearchMatch,
+				{
+					uri: document.uri,
+					ranges: thirdRange,
+					preview: { text: docText, matches: [thirdRange] }
+				} as vscode.TextSearchMatch
+			]);
+
+			// Call Find Usages
+			const findUsagesCommand = env.registeredCommands.get('colorbuddy.findColorUsages');
+			assert.ok(typeof findUsagesCommand === 'function', 'Find usages command should be registered');
+
+			await (findUsagesCommand as (...args: unknown[]) => unknown)();
+
+			const viewProvider = getAccessibilityView(env);
+			const findUsagesData = viewProvider.getLastRenderedData();
+			const findUsagesCount = findUsagesData?.usageMatches?.length ?? 0;
+
+			// Call Convert
+			const convertCommand = env.registeredCommands.get('colorbuddy.convertColorFormat');
+			assert.ok(typeof convertCommand === 'function', 'Convert command should be registered');
+
+			await (convertCommand as (...args: unknown[]) => unknown)();
+
+			const convertData = viewProvider.getLastRenderedData();
+			const convertCount = convertData?.usageMatches?.length ?? 0;
+
+			// Verify same number of results
+			assert.strictEqual(
+				convertCount,
+				findUsagesCount,
+				`Convert should find same number of results as Find Usages. Find Usages: ${findUsagesCount}, Convert: ${convertCount}`
+			);
+
+			// Verify the actual matches are the same
+			if (findUsagesData?.usageMatches && convertData?.usageMatches) {
+				const findUsagesRanges = findUsagesData.usageMatches.map(m => `${m.uri.toString()}:${m.range.start.line}:${m.range.start.character}`).sort();
+				const convertRanges = convertData.usageMatches.map(m => `${m.uri.toString()}:${m.range.start.line}:${m.range.start.character}`).sort();
+				
+				assert.deepStrictEqual(
+					convertRanges,
+					findUsagesRanges,
+					'Convert and Find Usages should find the same locations'
+				);
+			}
 		} finally {
 			await env.restore();
 		}

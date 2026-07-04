@@ -10,7 +10,7 @@ import type {
 	TestAccessibilityCommandPayload,
 	FindUsagesCommandPayload
 } from '../types';
-import { DEFAULT_LANGUAGES, DEFAULT_SEARCH_EXCLUDE_PATTERNS } from '../types';
+import { DEFAULT_LANGUAGES } from '../types';
 import {
 	MAX_CSS_FILES,
 	CSS_FILE_PATTERN,
@@ -36,7 +36,6 @@ import { Provider } from './provider';
 import { collectFormatConversions, getFormatLabel, appendFormatConversionList } from '../utils/colorFormatConversions';
 import type { FormatConversion } from '../utils/colorFormatConversions';
 import { appendQuickActions, EXECUTE_QUICK_ACTION_COMMAND, QuickActionLinkPayload } from '../utils/quickActions';
-import { buildConvertColorCommandPayload } from '../utils/commandPayloads';
 import { buildAccessibilityMetadata } from '../utils/accessibilityMetadata';
 import { getColorUsageCount } from '../utils/colorUsage';
 import { getColorInsights } from '../utils/colorInsights';
@@ -45,8 +44,10 @@ import {
 	AccessibilityViewProvider,
 	type AccessibilityReportPresenter,
 	type AccessibilityViewData,
-	type AccessibilityVariableContext
+	type AccessibilityVariableContext,
+	type AccessibilityUsageMatch
 } from './accessibilityViewProvider';
+import { UsageSearchService, ColorSearchContext } from './panels';
 
 const CSS_LIKE_LANGUAGES = new Set([
 	'css',
@@ -77,7 +78,6 @@ const CSS_LIKE_FILE_EXTENSIONS = new Set([
 ]);
 
 const SASS_FILE_EXTENSIONS = new Set(['.sass']);
-const MAX_COLOR_USAGE_RESULTS = 500;  // High limit - let users find all usages
 const COLORBUDDY_CONTAINER_COMMAND = 'workbench.view.extension.colorbuddy';
 
 interface ColorUsageMatch {
@@ -131,6 +131,7 @@ export class ExtensionController implements vscode.Disposable {
 	private readonly cssParser: CSSParser;
 	private readonly provider: Provider;
 	private readonly accessibilityViewProvider: AccessibilityReportPresenter;
+	private readonly usageSearchService: UsageSearchService;
 	private readonly disposables: vscode.Disposable[] = [];
 	private cssFileWatcher: vscode.FileSystemWatcher | null = null;
 	private registeredLanguageKey: string | null = null;
@@ -150,6 +151,7 @@ export class ExtensionController implements vscode.Disposable {
 		this.cssParser = new CSSParser(this.registry, this.colorParser);
 		this.provider = new Provider(this.registry, this.colorParser, this.colorFormatter, this.cssParser);
 		this.accessibilityViewProvider = new AccessibilityViewProvider(this.context.extensionUri);
+		this.usageSearchService = new UsageSearchService(this.colorFormatter);
 		this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 		this.statusBarItem.name = 'ColorBuddy Active Color';
 	}
@@ -276,7 +278,25 @@ export class ExtensionController implements vscode.Disposable {
 			vscode.commands.registerCommand('colorbuddy.convertColorFormat', (payload?: ConvertColorCommandPayload) =>
 				this.handleConvertColorFormatCommand(payload)
 			),
-			vscode.commands.registerCommand(EXECUTE_QUICK_ACTION_COMMAND, payload => this.handleExecuteQuickActionCommand(payload))
+			vscode.commands.registerCommand('colorbuddy.bulkConvertColorFormat', (conversions: ConvertColorCommandPayload[]) => 
+				this.handleBulkConvertCommand(conversions)
+			),
+			vscode.commands.registerCommand(EXECUTE_QUICK_ACTION_COMMAND, payload => this.handleExecuteQuickActionCommand(payload)),
+			// TEST COMMAND - Directly reveal accessibilityTestResultPanel
+			vscode.commands.registerCommand('colorbuddy.testAccessibilityTestResultPanel', async () => {
+				console.log('[cb] TEST: Directly revealing accessibilityTestResultPanel');
+				try {
+					// First, ensure the activity bar container is visible
+					await vscode.commands.executeCommand('workbench.view.extension.colorbuddy');
+					console.log('[cb] TEST: Container visible');
+					
+					// Then reveal the specific panel
+					await vscode.commands.executeCommand('colorbuddy.accessibilityContrast.focus');
+					console.log('[cb] TEST: Panel focus command executed');
+				} catch (error) {
+					console.error('[cb] TEST: Error opening panel:', error);
+				}
+			})
 		];
 
 		this.context.subscriptions.push(...commands);
@@ -394,26 +414,34 @@ export class ExtensionController implements vscode.Disposable {
 				return;
 			}
 
-			// Get all format variations of the color (hex, rgb, hsl, etc.)
-			const searchCandidates = this.getColorSearchCandidates(context.colorData);
-			console.log(`${LOG_PREFIX} searching for color in ${searchCandidates.length} format variations:`, searchCandidates);
-			
-			if (searchCandidates.length === 0) {
-				await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_FIND_USAGES_NO_COLOR));
-				return;
-			}
+			// Create color search context for UsageSearchService
+			const searchContext: ColorSearchContext = {
+				label: context.label,
+				colorData: context.colorData,
+				normalizedColor: context.colorData.normalizedColor ?? context.colorData.originalText,
+				vscodeColor: context.colorData.vscodeColor,
+				format: context.colorData.format ?? 'hex'
+			};
+
+			const targetPanel = payload?.panel ?? 'contexts';
 
 			// Show "searching" state in panel immediately
-			await this.updateFindUsagesPanelSearching(context.label, searchCandidates);
+			await this.updateFindUsagesPanelSearching(context.label, [], targetPanel, searchContext.normalizedColor);
 
-			// Search with progress notification and live updates to panel
+			// Search with progress notification using UsageSearchService
 			const allMatches = await vscode.window.withProgress({
 				location: vscode.ProgressLocation.Notification,
 				title: `Finding usages of ${context.label}...`,
 				cancellable: false
 			}, async (progress) => {
 				progress.report({ message: 'Searching workspace...', increment: 10 });
-				const matches = await this.searchMultipleFormats(searchCandidates, context.label);
+				const matches = await this.usageSearchService.searchColorUsages(
+					searchContext,
+					async (currentMatches: ColorUsageMatch[]) => {
+						// Progressive callback - update panel with partial results
+						await this.updateFindUsagesPanel(context.label, currentMatches, undefined, targetPanel, searchContext.normalizedColor);
+					}
+				);
 				progress.report({ increment: 90 });
 				return matches;
 			});
@@ -421,7 +449,7 @@ export class ExtensionController implements vscode.Disposable {
 			console.log(`${LOG_PREFIX} found ${allMatches.length} total matches`);
 			
 			// Final update to panel (clears "searching" state)
-			await this.updateFindUsagesPanel(context.label, allMatches);
+			await this.updateFindUsagesPanel(context.label, allMatches, undefined, targetPanel, searchContext.normalizedColor);
 			
 			if (allMatches.length === 0) {
 				await vscode.window.showInformationMessage(t(LocalizedStrings.COMMAND_FIND_USAGES_NO_RESULTS, context.label));
@@ -491,132 +519,18 @@ export class ExtensionController implements vscode.Disposable {
 		};
 	}
 
-	private async searchWithRegex(regexPattern: string, colorLabel: string, searchCandidates: string[]): Promise<ColorUsageMatch[]> {
-		const startTime = Date.now();
-		const matches: ColorUsageMatch[] = [];
-		const BATCH_UPDATE_SIZE = 5; // Update panel every 5 matches for smooth UX
-		
-		// Get user-configured exclude patterns
-		const config = vscode.workspace.getConfiguration('colorbuddy');
-		const excludePatterns: string[] = config.get('searchExcludePatterns', DEFAULT_SEARCH_EXCLUDE_PATTERNS);
-		const excludeGlob = excludePatterns.join(',');
-		
-		// Build include pattern from all supported file extensions
-		const fileExtensions = [
-			'ts', 'tsx', 'js', 'jsx',           // JavaScript/TypeScript
-			'css', 'scss', 'sass', 'less',      // Stylesheets
-			'html', 'xml', 'svg',               // Markup
-			'vue', 'svelte', 'astro',           // Frameworks
-			'php', 'blade.php',                 // PHP/Laravel
-			'py', 'rb', 'go', 'rs',            // Other languages
-			'java', 'kt', 'swift', 'cs',       // More languages
-			'cpp', 'c', 'm', 'dart', 'lua',    // Even more languages
-			'sh', 'ps1', 'sql', 'graphql',     // Scripts/queries
-			'json', 'jsonc', 'yaml', 'toml',   // Config files
-			'md', 'mdx'                         // Documentation
-		];
-		const searchPattern = `**/*.{${fileExtensions.join(',')}}`;
-		
-		console.log(`${LOG_PREFIX} searching with REGEX pattern (${regexPattern.length} chars) in all supported file types...`);
-		console.log(`${LOG_PREFIX} search config: include="${searchPattern}", exclude="${excludeGlob}"`);
-		console.log(`${LOG_PREFIX} workspace folders:`, vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath));
-		
-		// Use native search with REGEX - matches all color formats in ONE pass
-		let nativeSearchCompleted = false;
-		let callbackCount = 0;
-		try {
-			await vscode.workspace.findTextInFiles(
-				{ pattern: regexPattern, isRegExp: true, isCaseSensitive: true },
-				{
-					include: searchPattern,
-					exclude: excludeGlob,
-					maxResults: MAX_COLOR_USAGE_RESULTS,
-					useIgnoreFiles: true,
-					useGlobalIgnoreFiles: true
-				},
-				(result: vscode.TextSearchResult) => {
-					nativeSearchCompleted = true;
-					callbackCount++;
-					if (callbackCount === 1 || callbackCount % 10 === 0) {
-						console.log(`${LOG_PREFIX} callback #${callbackCount}, file: ${result.uri.fsPath}`);
-					}
-					if ('ranges' in result && 'preview' in result && result.preview && typeof result.preview === 'object' && 'text' in result.preview) {
-						const ranges = result.ranges as vscode.Range | readonly vscode.Range[];
-						const range = Array.isArray(ranges) ? ranges[0] : ranges;
-						const preview = result.preview as { text: string };
-						matches.push({
-							uri: result.uri,
-							range: range,
-							previewText: preview.text.trim(),
-							relativePath: vscode.workspace.asRelativePath(result.uri, false)
-						});
-						
-						// Update panel progressively every N matches (don't await to avoid slowing search)
-						if (matches.length % BATCH_UPDATE_SIZE === 0) {
-							this.updateFindUsagesPanel(colorLabel, matches, searchCandidates).catch(err => {
-								console.error(`${LOG_PREFIX} error updating panel:`, err);
-							});
-						}
-					}
-				}
-			);
-			
-			if (matches.length > 0 || nativeSearchCompleted) {
-				const elapsed = Date.now() - startTime;
-				console.log(`${LOG_PREFIX} found ${matches.length} matches in ${elapsed}ms using native REGEX search (${callbackCount} callbacks)`);
-				return matches;
-			}
-			
-			console.log(`${LOG_PREFIX} native regex search returned no results, trying fallback`);
-		} catch (nativeError) {
-			console.log(`${LOG_PREFIX} native regex search error, using fallback:`, nativeError);
-		}
-		
-		// Fallback: Direct file search with regex (for test environments)
-		const files = await vscode.workspace.findFiles(searchPattern, `{${excludeGlob}}`);
-		console.log(`${LOG_PREFIX} scanning ${files.length} files (fallback regex mode)`);
-		
-		const regex = new RegExp(regexPattern, 'g');
-		for (const fileUri of files) {
-			try {
-				const document = await vscode.workspace.openTextDocument(fileUri);
-				const text = document.getText();
-				
-				regex.lastIndex = 0;
-				let match;
-				while ((match = regex.exec(text)) !== null) {
-					const position = document.positionAt(match.index);
-					const line = document.lineAt(position.line);
-					
-					matches.push({
-						uri: fileUri,
-						range: new vscode.Range(position, position.translate(0, match[0].length)),
-						previewText: line.text.trim(),
-						relativePath: vscode.workspace.asRelativePath(fileUri, false)
-					});
-					
-					if (matches.length >= MAX_COLOR_USAGE_RESULTS) {
-						break;
-					}
-				}
-			} catch (err) {
-				// Skip unreadable files
-			}
-			
-			if (matches.length >= MAX_COLOR_USAGE_RESULTS) {
-				break;
-			}
-		}
-		
-		const elapsed = Date.now() - startTime;
-		console.log(`${LOG_PREFIX} found ${matches.length} matches in ${elapsed}ms using fallback search`);
-		return matches;
-	}
 
 	private async handleTestAccessibilityCommand(payload?: TestAccessibilityCommandPayload): Promise<void> {
+		console.log(`${LOG_PREFIX} ========================================`);
+		console.log(`${LOG_PREFIX} handleTestAccessibilityCommand START`);
+		console.log(`${LOG_PREFIX} Payload received:`, JSON.stringify(payload, null, 2));
+		console.log(`${LOG_PREFIX} Panel from payload:`, payload?.panel);
+		console.log(`${LOG_PREFIX} ========================================`);
+		
 		try {
 			const context = await this.resolveAccessibilityColorContext(payload);
 			if (!context) {
+				console.log(`${LOG_PREFIX} No context resolved, aborting`);
 				return;
 			}
 
@@ -645,7 +559,9 @@ export class ExtensionController implements vscode.Disposable {
 			};
 
 			const panel = payload?.panel ?? 'summary';
-		await this.presentAccessibilityReport(data, panel);
+			console.log(`${LOG_PREFIX} About to present accessibility report for panel: "${panel}"`);
+			await this.presentAccessibilityReport(data, panel);
+			console.log(`${LOG_PREFIX} presentAccessibilityReport completed`);
 		} catch (error) {
 			console.error(`${LOG_PREFIX} failed to test color accessibility`, error);
 			await vscode.window.showErrorMessage(t(LocalizedStrings.COMMAND_TEST_ACCESSIBILITY_ERROR));
@@ -693,12 +609,25 @@ export class ExtensionController implements vscode.Disposable {
 	}
 
 	private async presentAccessibilityReport(data: AccessibilityViewData, panel: 'summary' | 'contrast' | 'contexts' | 'formats' = 'summary'): Promise<void> {
+		console.log(`${LOG_PREFIX} presentAccessibilityReport called with panel: "${panel}"`);
+		console.log(`${LOG_PREFIX} Updating report data...`);
 		this.accessibilityViewProvider.updateReport(data, panel);
+		console.log(`${LOG_PREFIX} Report data updated`);
+		
 		try {
+			console.log(`${LOG_PREFIX} Executing command: ${COLORBUDDY_CONTAINER_COMMAND}`);
 			await vscode.commands.executeCommand(COLORBUDDY_CONTAINER_COMMAND);
+			console.log(`${LOG_PREFIX} Container command executed`);
+			
+			// Small delay to ensure container is ready
+			await new Promise(resolve => setTimeout(resolve, 50));
+			
+			console.log(`${LOG_PREFIX} Revealing section: "${panel}"`);
 			this.accessibilityViewProvider.revealSection(panel, false);
+			console.log(`${LOG_PREFIX} Section revealed`);
 		} catch (error) {
 			console.error(`${LOG_PREFIX} failed to reveal accessibility report view`, error);
+			console.error(`${LOG_PREFIX} Error details:`, error);
 		}
 	}
 
@@ -738,18 +667,23 @@ export class ExtensionController implements vscode.Disposable {
 		try {
 			const uri = vscode.Uri.parse(payload.uri);
 			let editor = vscode.window.visibleTextEditors.find(ed => ed.document.uri.toString() === uri.toString());
+			
+			const start = new vscode.Position(payload.range.start.line, payload.range.start.character);
+			const end = new vscode.Position(payload.range.end.line, payload.range.end.character);
+			const range = new vscode.Range(start, end);
+			
 			if (!editor) {
 				const document = await vscode.workspace.openTextDocument(uri);
-				editor = await vscode.window.showTextDocument(document, { preview: false });
+				// Open document with selection at the target range
+				editor = await vscode.window.showTextDocument(document, { 
+					preview: false,
+					selection: range
+				});
 			}
 
 			if (!editor) {
 				return true;
 			}
-
-			const start = new vscode.Position(payload.range.start.line, payload.range.start.character);
-			const end = new vscode.Position(payload.range.end.line, payload.range.end.character);
-			const range = new vscode.Range(start, end);
 			
 			// Validate range is within document bounds
 			if (start.line >= editor.document.lineCount || end.line >= editor.document.lineCount) {
@@ -765,26 +699,68 @@ export class ExtensionController implements vscode.Disposable {
 			}
 
 			// If source is 'panel', do the conversion directly (user clicked a format in the panel)
+			// NO QuickPicks, NO dialogs - just silent replacement at the exact location
 			// Otherwise, show the formats panel (user clicked Convert quick action)
 			if (payload.source === 'panel' && payload.format) {
 				const formatted = this.colorFormatter.formatByFormat(parsed.vscodeColor, payload.format);
 				if (formatted) {
-					const success = await editor.edit(editBuilder => {
-						editBuilder.replace(range, formatted);
+					const existingText = editor.document.getText(range);
+					const hasTrailingSemicolon = existingText.trimEnd().endsWith(';');
+					const formattedWithSemicolon = hasTrailingSemicolon && !formatted.trimEnd().endsWith(';')
+						? `${formatted};`
+						: formatted;
+
+					await editor.edit(editBuilder => {
+						editBuilder.replace(range, formattedWithSemicolon);
 					});
+
+					// Update selection/highlight to the new value
+					const updatedRange = new vscode.Range(range.start, range.start.translate(0, formattedWithSemicolon.length));
+					editor.selection = new vscode.Selection(updatedRange.start, updatedRange.end);
+					editor.revealRange(updatedRange, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+
+					// Update panel data model (needed for checkmark logic)
+					const updatedPreview = editor.document.lineAt(updatedRange.start.line).text.trim();
+					const lastData = this.accessibilityViewProvider.getLastRenderedData();
+					const insights = getColorInsights(parsed.vscodeColor);
+					const conversions = collectFormatConversions(this.colorParser, this.colorFormatter, parsed.vscodeColor, payload.format);
 					
-					if (success) {
-						// Calculate new range after replacement (text length may have changed)
-						const newEndCharacter = range.start.character + formatted.length;
-						const newRange = new vscode.Range(
-							range.start,
-							new vscode.Position(range.start.line, newEndCharacter)
-						);
-						
-						// Update formats panel with new range and current format
-						// This allows subsequent conversions to replace the correct text
-						await this.performColorConversion(editor, newRange, parsed.vscodeColor, payload.format);
-					}
+					// Preserve usage match ranges (stable search results) but update preview text at conversion location
+					const updatedMatches = (lastData?.usageMatches && lastData.usageMatches.length > 0)
+						? lastData.usageMatches.map(match => {
+							const sameLocation = match.uri.toString() === uri.toString()
+								&& match.range.start.line === range.start.line
+								&& match.range.start.character === range.start.character;
+							return sameLocation
+								? {
+									...match,
+									// Keep original range (for stable display), but update preview to show converted value
+									previewText: updatedPreview,
+									matchText: formattedWithSemicolon
+								}
+								: match;
+						})
+						: [];
+
+					const panelData: AccessibilityViewData = {
+						label: payload.originalText ?? formattedWithSemicolon,
+						normalizedColor: insights.hex,
+						colorName: insights.name,
+						colorHex: insights.hex,
+						brightness: insights.brightness,
+						report: { samples: [] } as any,
+						conversions,
+						currentFormatValue: formattedWithSemicolon,
+						editorRange: updatedRange,
+						editorUri: uri.toString(),
+						usageMatches: updatedMatches
+					};
+
+					// Update panel with new data (includes visual-only update for smooth UX)
+					this.accessibilityViewProvider.updateReport(panelData, 'formats');
+					
+					// Also send visual-only update message for smooth transition
+					this.accessibilityViewProvider.updateCurrentFormat(payload.format);
 				}
 			} else {
 				await this.performColorConversion(editor, range, parsed.vscodeColor, parsed.formatPriority[0]);
@@ -795,6 +771,96 @@ export class ExtensionController implements vscode.Disposable {
 			await vscode.window.showErrorMessage(t(LocalizedStrings.COMMAND_CONVERT_COLOR_ERROR));
 			return true;
 		}
+	}
+
+	/**
+	 * Handle bulk conversion of multiple color occurrences.
+	 */
+	private async handleBulkConvertCommand(conversions: ConvertColorCommandPayload[]): Promise<void> {
+		if (!conversions || !Array.isArray(conversions) || conversions.length === 0) {
+			return;
+		}
+
+		console.log(`${LOG_PREFIX} Starting bulk conversion for ${conversions.length} items`);
+
+		try {
+			// Group conversions by URI to optimize edits
+			const groupedByUri = new Map<string, ConvertColorCommandPayload[]>();
+			for (const conv of conversions) {
+				const list = groupedByUri.get(conv.uri) || [];
+				list.push(conv);
+				groupedByUri.set(conv.uri, list);
+			}
+
+			let totalConverted = 0;
+
+			// Wrap in progress notification
+			await vscode.window.withProgress({
+				location: vscode.ProgressLocation.Notification,
+				title: `Converting ${conversions.length} color occurrences...`,
+				cancellable: false
+			}, async (progress) => {
+				const increment = 100 / groupedByUri.size;
+
+				for (const [uriStr, siteConversions] of groupedByUri.entries()) {
+					const uri = vscode.Uri.parse(uriStr);
+					const doc = await vscode.workspace.openTextDocument(uri);
+					const editor = await vscode.window.showTextDocument(doc, { preview: false });
+
+					// Sort conversions for this file in REVERSE order (bottom to top)
+					// to avoid range shifts during replacement
+					const sortedConversions = [...siteConversions].sort((a, b) => {
+						if (b.range.start.line !== a.range.start.line) {
+							return b.range.start.line - a.range.start.line;
+						}
+						return b.range.start.character - a.range.start.character;
+					});
+
+					await editor.edit(editBuilder => {
+						for (const conv of sortedConversions) {
+							const parsed = this.colorParser.parseColor(conv.normalizedColor || conv.originalText || '');
+							if (parsed && conv.format) {
+								const formatted = this.colorFormatter.formatByFormat(parsed.vscodeColor, conv.format);
+								if (formatted) {
+									const start = new vscode.Position(conv.range.start.line, conv.range.start.character);
+									const end = new vscode.Position(conv.range.end.line, conv.range.end.character);
+									const range = new vscode.Range(start, end);
+									
+									const existingText = doc.getText(range);
+									const hasTrailingSemicolon = existingText.trimEnd().endsWith(';');
+									const formattedWithSemicolon = hasTrailingSemicolon && !formatted.trimEnd().endsWith(';')
+										? `${formatted};`
+										: formatted;
+
+									editBuilder.replace(range, formattedWithSemicolon);
+									totalConverted++;
+								}
+							}
+						}
+					});
+
+					progress.report({ increment });
+				}
+			});
+
+			await vscode.window.showInformationMessage(`Successfully converted ${totalConverted} occurrences across ${groupedByUri.size} file(s).`);
+			
+			// Refresh all editors to update decorations
+			this.refreshVisibleEditors();
+			
+		} catch (error) {
+			console.error(`${LOG_PREFIX} Bulk conversion failed`, error);
+			await vscode.window.showErrorMessage('Bulk conversion failed. Check console for details.');
+		}
+	}
+
+	/**
+	 * Helper to detect if text looks like a Tailwind class
+	 */
+	// @ts-ignore - keeping for potential future use
+	private looksLikeTailwindClass(text: string): boolean {
+		// Simple heuristic: bg-, text-, border- prefixes without parentheses
+		return /^(bg|text|border)-[\w-]+$/.test(text) && !text.includes('(');
 	}
 
 	private async performColorConversion(
@@ -812,6 +878,68 @@ export class ExtensionController implements vscode.Disposable {
 		const currentValue = editor.document.getText(range);
 		const insights = getColorInsights(color);
 		
+		// Get full color data from document to get all color properties (CSS variable, Tailwind class, etc.)
+		const fullColorData = await this.ensureColorData(editor.document);
+		const colorDataAtCursor = fullColorData.find(cd => 
+			cd.range.start.line === range.start.line &&
+			cd.range.start.character === range.start.character
+		);
+		
+		// Build search candidates with all properties if we found the color data
+		const colorData: ColorData = colorDataAtCursor || {
+			range,
+			originalText: currentValue,
+			normalizedColor: insights.hex,
+			vscodeColor: color,
+			format: format || 'hex'
+		};
+		
+		// Use UsageSearchService for workspace search
+		const searchContext: ColorSearchContext = {
+			label: currentValue,
+			colorData: colorData,
+			normalizedColor: insights.hex,
+			vscodeColor: color,
+			format: format || 'hex'
+		};
+		
+		let usageMatches: AccessibilityUsageMatch[] = [];
+		const allMatches = await this.usageSearchService.searchColorUsages(searchContext);
+		
+		if (allMatches.length > 0) {
+			// Cache opened documents per URI to avoid repeated reads
+			const docCache = new Map<string, vscode.TextDocument>();
+			const getDoc = async (uri: vscode.Uri) => {
+				const key = uri.toString();
+				if (docCache.has(key)) return docCache.get(key)!;
+				const doc = await vscode.workspace.openTextDocument(uri);
+				docCache.set(key, doc);
+				return doc;
+			};
+			
+			usageMatches = [];
+			for (const match of allMatches) {
+				let matchText = '';
+				let isConvertible = false;
+				try {
+					const doc = await getDoc(match.uri);
+					matchText = doc.getText(match.range);
+					isConvertible = !!this.colorParser.parseColor(matchText);
+				} catch (err) {
+					// If we can't read the text, default to non-convertible
+					isConvertible = false;
+				}
+				usageMatches.push({
+					uri: match.uri,
+					range: match.range,
+					previewText: match.previewText,
+					relativePath: vscode.workspace.asRelativePath(match.uri, false),
+					matchText,
+					isConvertible
+				});
+			}
+		}
+		
 		// Create data for the formats panel
 		const data: AccessibilityViewData = {
 			label: currentValue,
@@ -823,12 +951,215 @@ export class ExtensionController implements vscode.Disposable {
 			conversions,
 			currentFormatValue: currentValue,
 			editorRange: range,
-			editorUri: editor.document.uri.toString()
+			editorUri: editor.document.uri.toString(),
+			usageMatches
 		};
 
-		// Update formats panel with conversion options
+		// Update formats panel with conversion options and usage matches
 		this.accessibilityViewProvider.updateReport(data, 'formats');
 		this.accessibilityViewProvider.revealSection('formats', true);
+	}
+
+	/**
+	 * Handle convert-at-definition for CSS variables, Tailwind classes, and CSS classes.
+	 * This is Option 2: navigate to the definition and convert the actual color value.
+	 */
+	// DISABLED: Convert-at-definition causes QuickPick dialogs
+	// User wants silent replacement at exact location only
+	// @ts-ignore - keeping method for potential future use
+	private async handleConvertAtDefinition(
+		colorData: ColorData,
+		targetFormat: ColorFormat
+	): Promise<boolean> {
+		try {
+			// 1. Look up definitions in Registry
+			const definitions = this.getDefinitionsForColorData(colorData);
+			
+			if (definitions.length === 0) {
+				await vscode.window.showErrorMessage('Could not find definition for this color reference');
+				return true;
+			}
+			
+			// 2. Handle multiple definitions (show QuickPick)
+			let selectedDef = definitions[0];
+			if (definitions.length > 1) {
+				const selected = await this.showDefinitionQuickPick(definitions);
+				if (!selected) {
+					return true; // User cancelled
+				}
+				selectedDef = selected;
+			}
+			
+			// 3. Open definition file
+			const doc = await vscode.workspace.openTextDocument(selectedDef.uri);
+			const editor = await vscode.window.showTextDocument(doc);
+			
+			// 4. Parse definition line to extract color value
+			const lineText = doc.lineAt(selectedDef.line).text;
+			const colorValue = this.extractColorFromDefinition(lineText, colorData);
+			
+			if (!colorValue) {
+				await vscode.window.showErrorMessage('Could not extract color value from definition');
+				return true;
+			}
+			
+			// 5. Handle nested variables (resolve var() references)
+			const resolvedValue = await this.resolveNestedVariable(colorValue);
+			
+			// 6. Parse and convert color
+			const parsed = this.colorParser.parseColor(resolvedValue);
+			if (!parsed) {
+				await vscode.window.showErrorMessage('Invalid color value in definition');
+				return true;
+			}
+			
+			const converted = this.colorFormatter.formatByFormat(parsed.vscodeColor, targetFormat);
+			if (!converted) {
+				await vscode.window.showErrorMessage('Failed to convert color format');
+				return true;
+			}
+			
+			// 7. Calculate exact range in definition line
+			const colorRange = this.findColorRangeInLine(lineText, resolvedValue, selectedDef.line);
+			
+			// 8. Apply edit
+			const success = await editor.edit(editBuilder => {
+				editBuilder.replace(colorRange, converted);
+			});
+			
+			if (success) {
+				// 9. Show success notification with file location
+				const fileName = selectedDef.uri.path.split('/').pop() || 'file';
+				const varName = colorData.variableName || colorData.tailwindClass || colorData.cssClassName || 'color';
+				await vscode.window.showInformationMessage(
+					`Converted ${varName} to ${targetFormat} in ${fileName}:${selectedDef.line + 1}`
+				);
+			}
+			
+			return true;
+		} catch (error) {
+			console.error(`${LOG_PREFIX} failed to convert at definition`, error);
+			await vscode.window.showErrorMessage('Failed to convert color at definition');
+			return true;
+		}
+	}
+
+	/**
+	 * Get definitions from ColorData by looking up in Registry
+	 */
+	private getDefinitionsForColorData(data: ColorData): Array<{uri: vscode.Uri, line: number, value: string}> {
+		if (data.variableName) {
+			const decls = this.registry.getVariable(data.variableName);
+			if (decls) {
+				return decls.map(d => ({uri: d.uri, line: d.line, value: d.value}));
+			}
+		}
+		if (data.tailwindClass) {
+			const decls = this.registry.getVariable(data.tailwindClass); // Tailwind classes stored as variables
+			if (decls) {
+				return decls.map(d => ({uri: d.uri, line: d.line, value: d.value}));
+			}
+		}
+		if (data.cssClassName) {
+			const decls = this.registry.getClass(data.cssClassName);
+			if (decls) {
+				return decls.map(d => ({uri: d.uri, line: d.line, value: d.value}));
+			}
+		}
+		return [];
+	}
+
+	/**
+	 * Show QuickPick for selecting which definition to convert
+	 */
+	private async showDefinitionQuickPick(definitions: Array<{uri: vscode.Uri, line: number, value: string}>): Promise<{uri: vscode.Uri, line: number, value: string} | undefined> {
+		const items = definitions.map(def => ({
+			label: def.uri.path.split('/').pop() || 'file',
+			description: `Line ${def.line + 1}`,
+			detail: def.value,
+			definition: def
+		}));
+		
+		const selected = await vscode.window.showQuickPick(items, {
+			placeHolder: 'Multiple definitions found. Select one:'
+		});
+		
+		return selected?.definition;
+	}
+
+	/**
+	 * Extract color value from definition line
+	 */
+	private extractColorFromDefinition(lineText: string, colorData: ColorData): string {
+		// Parse CSS: --primary: #3b82f6; → #3b82f6
+		// Parse Tailwind config: 'primary': '#3b82f6' → #3b82f6
+		// Parse CSS class: .primary { color: #3b82f6; } → #3b82f6
+		
+		if (colorData.variableName) {
+			// Match: --name: VALUE;
+			const match = lineText.match(/--[\w-]+\s*:\s*([^;]+)/);
+			return match?.[1].trim() || '';
+		}
+		
+		if (colorData.cssClassName) {
+			// Match: color: VALUE; or background-color: VALUE;
+			const match = lineText.match(/(?:color|background(?:-color)?)\s*:\s*([^;]+)/);
+			return match?.[1].trim() || '';
+		}
+		
+		if (colorData.tailwindClass) {
+			// Match: 'name': 'VALUE' or "name": "VALUE"
+			const match = lineText.match(/['"][\w-]+['"]\s*:\s*['"]([^'"]+)['"]/);
+			return match?.[1].trim() || '';
+		}
+		
+		return '';
+	}
+
+	/**
+	 * Resolve nested var() references
+	 */
+	private async resolveNestedVariable(value: string): Promise<string> {
+		// If value is var(--name), recursively resolve
+		const varMatch = value.match(/var\(\s*(--[\w-]+)\s*\)/);
+		if (!varMatch) {
+			return value;
+		}
+		
+		const nestedVar = varMatch[1];
+		const decls = this.registry.getVariable(nestedVar);
+		if (!decls || decls.length === 0) {
+			return value;
+		}
+		
+		// Use first declaration (highest specificity)
+		const nestedValue = decls[0].value;
+		
+		// Check for circular reference using visited set
+		return this.cssParser.resolveNestedVariables(nestedValue, {
+			visited: new Set([nestedVar])
+		});
+	}
+
+	/**
+	 * Find exact range of color value in line
+	 */
+	private findColorRangeInLine(lineText: string, colorValue: string, lineNumber: number): vscode.Range {
+		const startChar = lineText.indexOf(colorValue);
+		if (startChar === -1) {
+			// Fallback: replace entire value after colon
+			const colonIdx = lineText.indexOf(':');
+			const semicolonIdx = lineText.indexOf(';', colonIdx);
+			return new vscode.Range(
+				lineNumber, colonIdx + 1,
+				lineNumber, semicolonIdx > 0 ? semicolonIdx : lineText.length
+			);
+		}
+		
+		return new vscode.Range(
+			lineNumber, startChar,
+			lineNumber, startChar + colorValue.length
+		);
 	}
 
 	private async ensurePerformanceLoggingEnabled(): Promise<boolean> {
@@ -891,7 +1222,9 @@ export class ExtensionController implements vscode.Disposable {
 	}
 
 	private async handleExecuteQuickActionCommand(payload?: QuickActionLinkPayload): Promise<void> {
-		console.log(`${LOG_PREFIX} handleExecuteQuickActionCommand called with payload:`, JSON.stringify(payload, null, 2));
+		console.log(`[cb] ====== QUICK ACTION CLICKED ======`);
+		console.log(`[cb] Payload:`, JSON.stringify(payload, null, 2));
+		
 		if (!payload || typeof payload.target !== 'string') {
 			console.warn(`${LOG_PREFIX} quick action invoked without a valid target`, payload);
 			return;
@@ -903,32 +1236,16 @@ export class ExtensionController implements vscode.Disposable {
 		}
 
 		const args = Array.isArray(payload.args) ? payload.args : [];
-		console.log(`${LOG_PREFIX} executing command: ${payload.target} with ${args.length} args`, args);
+		console.log(`[cb] Executing: ${payload.target}`);
+		console.log(`[cb] Args:`, JSON.stringify(args, null, 2));
 
 		try {
-			// Check if command exists
-			console.log(`${LOG_PREFIX} getting all commands...`);
-			const allCommands = await vscode.commands.getCommands(true);
-			console.log(`${LOG_PREFIX} got ${allCommands.length} commands`);
-			const commandExists = allCommands.includes(payload.target);
-			console.log(`${LOG_PREFIX} command ${payload.target} exists: ${commandExists}`);
-			
-			if (!commandExists) {
-				console.error(`${LOG_PREFIX} command ${payload.target} is not registered!`);
-				await vscode.window.showErrorMessage(`Command ${payload.target} is not registered`);
-				return;
-			}
-
-			console.log(`${LOG_PREFIX} about to execute command with args:`, JSON.stringify(args));
-			const result = await vscode.commands.executeCommand(payload.target, ...args);
-			console.log(`${LOG_PREFIX} command ${payload.target} completed, result:`, result);
+			await vscode.commands.executeCommand(payload.target, ...args);
+			console.log(`[cb] Command completed successfully`);
 		} catch (error) {
-			console.error(`${LOG_PREFIX} EXCEPTION in executeCommand:`, error);
-			console.error(`${LOG_PREFIX} Error stack:`, error instanceof Error ? error.stack : 'no stack');
-			// Show error to user
+			console.error(`${LOG_PREFIX} EXCEPTION:`, error);
 			await vscode.window.showErrorMessage(`Failed to execute ${payload.target}: ${String(error)}`);
 		}
-		console.log(`${LOG_PREFIX} handleExecuteQuickActionCommand END`);
 	}
 
 	/**
@@ -977,7 +1294,7 @@ export class ExtensionController implements vscode.Disposable {
 				for (const editor of editors) {
 					const editorKey = this.getEditorKey(editor);
 					if (!this.stateManager.isEditorVisible(editorKey)) {
-						console.log('[cb] Editor became visible, refreshing:', editor.document.uri.fsPath);
+
 						perfLogger.log('Editor became visible, refreshing', editor.document.uri.fsPath);
 						this.stateManager.markEditorVisible(editorKey);
 						this.refreshEditor(editor).catch(error => {
@@ -988,7 +1305,7 @@ export class ExtensionController implements vscode.Disposable {
 				// Mark hidden editors
 				for (const visibleKey of this.stateManager.getVisibleEditors()) {
 					if (!currentVisible.has(visibleKey)) {
-						console.log('[cb] Editor became hidden:', visibleKey);
+
 						perfLogger.log('Editor became hidden', visibleKey);
 						this.stateManager.markEditorHidden(visibleKey);
 					}
@@ -1636,107 +1953,65 @@ export class ExtensionController implements vscode.Disposable {
 		return colorData.find(data => data.range.contains(position));
 	}
 
-	private getColorSearchCandidates(data: ColorData): string[] {
-		const values = new Set<string>();
-		if (data.originalText) {
-			values.add(data.originalText);
-			// Add spacing variations for rgb/rgba/hsl/hsla functions
-			values.add(this.removeSpacesFromColorFunction(data.originalText));
-		}
-		if (data.normalizedColor) {
-			values.add(data.normalizedColor);
-			values.add(this.removeSpacesFromColorFunction(data.normalizedColor));
-		}
-		if (data.isCssVariable && data.variableName) {
-			values.add(data.variableName);
-		}
-		if (data.isTailwindClass && data.tailwindClass) {
-			values.add(data.tailwindClass);
-		}
-		if (data.isCssClass && data.cssClassName) {
-			values.add(data.cssClassName);
-		}
+	// Color search methods removed - now handled by UsageSearchService
 
-		for (const conversion of collectFormatConversions(this.colorParser, this.colorFormatter, data.vscodeColor, data.format)) {
-			values.add(conversion.value);
-			values.add(this.removeSpacesFromColorFunction(conversion.value));
-		}
-
-		return Array.from(values).filter(v => v.length > 0);
-	}
-
-	private removeSpacesFromColorFunction(colorStr: string): string {
-		// Remove spaces after commas and around slashes in color functions
-		// rgba(239, 68, 68, 0.9) → rgba(239,68,68,0.9)
-		// hsla(0 100% 50% / 0.5) → hsla(0 100% 50%/0.5)
-		if (/^(rgb|rgba|hsl|hsla)\(/i.test(colorStr)) {
-			return colorStr.replace(/,\s+/g, ',').replace(/\s*\/\s*/g, '/');
-		}
-		return colorStr;
-	}
-
-	private async searchMultipleFormats(searchCandidates: string[], colorLabel: string): Promise<ColorUsageMatch[]> {
-		if (searchCandidates.length === 0) {
-			return [];
-		}
-		
-		// Build ONE regex pattern matching ALL format variations
-		// This is the key to speed - single regex search instead of 10+ sequential searches
-		const regexPattern = this.buildColorSearchRegex(searchCandidates);
-		return await this.searchWithRegex(regexPattern, colorLabel, searchCandidates);
-	}
-	
-	private buildColorSearchRegex(searchCandidates: string[]): string {
-		// Escape special regex characters for literal matching
-		const escapedCandidates = searchCandidates.map(candidate => {
-			return candidate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		});
-		
-		// Build alternation pattern: (pattern1|pattern2|pattern3|...)
-		return `(?:${escapedCandidates.join('|')})`;
-	}
-
-	private async updateFindUsagesPanelSearching(colorLabel: string, searchCandidates: string[]): Promise<void> {
+	private async updateFindUsagesPanelSearching(colorLabel: string, searchCandidates: string[], targetPanel: 'contexts' | 'formats' = 'contexts', normalizedColor?: string): Promise<void> {
 		console.log(`${LOG_PREFIX} preparing to search for ${searchCandidates.length} color format variations of "${colorLabel}"`);
 		
 		// Show initial "searching" state with format variations
-		await this.updateFindUsagesPanel(colorLabel, [], searchCandidates);
+		await this.updateFindUsagesPanel(colorLabel, [], searchCandidates, targetPanel, normalizedColor);
 	}
 
-	private async updateFindUsagesPanel(searchValue: string, matches: ColorUsageMatch[], searchCandidates?: string[]): Promise<void> {
+	private async updateFindUsagesPanel(searchValue: string, matches: ColorUsageMatch[], searchCandidates?: string[], targetPanel: 'contexts' | 'formats' = 'contexts', normalizedColor?: string): Promise<void> {
 		// Convert matches to the format expected by the view
 		const usageMatches = matches.map(match => ({
 			uri: match.uri,
 			range: match.range,
 			previewText: match.previewText,
-			relativePath: vscode.workspace.asRelativePath(match.uri, false)
+			relativePath: vscode.workspace.asRelativePath(match.uri, false),
+			isConvertible: true
 		}));
 
-		// Create a minimal data object for the find usages panel
+		// If we're targeting the formats panel, we need real color data for conversions
+		let conversions: FormatConversion[] = [];
+		let insights = { name: '', hex: '', brightness: 0 };
+		
+		if (targetPanel === 'formats' || searchCandidates) {
+			// Use normalizedColor if provided (for CSS vars/classes), otherwise try searchValue
+			const colorToParse = normalizedColor || searchValue;
+			const parsed = this.colorParser.parseColor(colorToParse);
+			if (parsed) {
+				conversions = collectFormatConversions(this.colorParser, this.colorFormatter, parsed.vscodeColor, parsed.formatPriority[0]);
+				insights = getColorInsights(parsed.vscodeColor);
+			}
+		}
+
+		// Create a unified data object for both panels
 		const data: AccessibilityViewData = {
 			label: searchValue,
-			normalizedColor: '', // Not needed for find usages
-			colorName: searchCandidates ? `Searching ${searchCandidates.length} formats...` : '',
-			colorHex: '',
-			brightness: 0,
-			report: { samples: [] } as any, // Not needed for find usages
-			conversions: searchCandidates ? searchCandidates.map(c => ({ format: 'custom' as any, value: c, label: c })) : [],
+			normalizedColor: insights.hex,
+			colorName: searchCandidates ? `Searching ${searchCandidates.length} formats...` : (insights.name || ''),
+			colorHex: insights.hex,
+			brightness: insights.brightness,
+			report: { samples: [] } as any, // Only needed for contrast panel
+			conversions: conversions.length > 0 ? conversions : (searchCandidates ? searchCandidates.map(c => ({ format: 'custom' as any, value: c, label: c })) : []),
 			usageMatches,
-			searchValue
+			searchValue,
+			section: targetPanel
 		};
 
-		console.log(`${LOG_PREFIX} Updating find usages panel with ${matches.length} matches${searchCandidates ? ' (searching...)' : ''}`);
+		console.log(`${LOG_PREFIX} Updating ${targetPanel} panel with ${matches.length} matches${searchCandidates ? ' (searching...)' : ''}`);
 		
 		// Update the content FIRST so it's ready when panel opens
-		this.accessibilityViewProvider.updateReport(data, 'contexts');
+		this.accessibilityViewProvider.updateReport(data, targetPanel);
 		
 		// Now reveal the container and panel with content already loaded
 		try {
-			await vscode.commands.executeCommand(COLORBUDDY_CONTAINER_COMMAND);
-			await this.accessibilityViewProvider.revealSection('contexts', true);
-			console.log(`${LOG_PREFIX} Find usages panel revealed with ${matches.length} matches`);
+			await vscode.commands.executeCommand('workbench.view.extension.colorbuddy');
+			await this.accessibilityViewProvider.revealSection(targetPanel, true);
+			console.log(`${LOG_PREFIX} ${targetPanel} panel revealed with ${matches.length} matches`);
 		} catch (error) {
-			console.error(`${LOG_PREFIX} Failed to reveal find usages panel:`, error);
+			console.error(`${LOG_PREFIX} Failed to reveal ${targetPanel} panel:`, error);
 		}
 	}
 
@@ -1768,7 +2043,7 @@ export class ExtensionController implements vscode.Disposable {
 		markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_COLOR)}:** \`${primaryValue}\`\n\n`);
 		markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_NORMALIZED)}:** \`${data.normalizedColor}\`\n\n`);
 		const insights = getColorInsights(data.vscodeColor);
-		markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_COLOR_NAME)}:** ${insights.name} (\`${insights.hex}\`)\n\n`);
+		markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_COLOR_VALUE)}:** ${insights.name} (\`${insights.hex}\`)\n\n`);
 		markdown.appendMarkdown(`**${t(LocalizedStrings.TOOLTIP_BRIGHTNESS)}:** ${insights.brightness}%\n\n`);
 		markdown.appendMarkdown(`**${t(LocalizedStrings.STATUS_BAR_USAGE_COUNT)}:** ${metrics.usageCount}\n\n`);
 		this.appendCssVariableContexts(markdown, data);
@@ -1777,7 +2052,6 @@ export class ExtensionController implements vscode.Disposable {
 		appendFormatConversionList(markdown, conversions, { surface: 'statusBar' });
 
 		const copyPayload = this.buildQuickActionCopyPayload(data, conversions, primaryValue);
-		const convertPayload = buildConvertColorCommandPayload(data, 'statusBar');
 		const metadata = buildAccessibilityMetadata(data, metrics.usageCount);
 		const accessibilityPayload: TestAccessibilityCommandPayload | undefined = data.normalizedColor
 			? {
@@ -1801,9 +2075,6 @@ export class ExtensionController implements vscode.Disposable {
 		const overrides: Record<string, { args?: unknown[] }> = {};
 		if (copyPayload) {
 			overrides['colorbuddy.copyColorAs'] = { args: [copyPayload] };
-		}
-		if (convertPayload) {
-			overrides['colorbuddy.convertColorFormat'] = { args: [convertPayload] };
 		}
 		if (accessibilityPayload) {
 			overrides['colorbuddy.testColorAccessibility'] = { args: [accessibilityPayload] };
