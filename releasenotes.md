@@ -1,5 +1,30 @@
 # ColorBuddy Release Notes
 
+## Version 0.0.62 - July 6, 2026
+
+### Documentation + Test Harness Stability Update
+
+This release publishes the changes committed after `v0.0.61`, primarily documentation refinements plus a small integration-test harness hardening.
+
+### What Changed
+
+**README Improvements**
+- Added explicit `oklab(...)` and `oklch(...)` examples to supported color formats.
+- Refined wording/formatting in configuration guidance for readability.
+- Updated VSIX installation guidance and release link consistency.
+
+**Integration Test Harness Fixes**
+- Updated HTML and Vue color-provider conflict integration tests to mock `window.registerWebviewViewProvider` during controller setup.
+- Prevents test-environment activation failures when webview providers are registered by the extension.
+
+### Why This Matters
+
+Documentation now better reflects currently supported color formats and installation flow, while integration tests are more robust against activation-path registration requirements.
+
+### Upgrading
+
+Update from the VS Code marketplace (or `code --install-extension`). No configuration changes are required.
+
 ## Version 0.0.6 - July 1, 2026
 
 ### OKLab/OKLCH Support + Swatch Accuracy Fixes

@@ -3,6 +3,21 @@
 All notable changes to the **ColorBuddy** extension will be documented in this file.
 
 
+## [0.0.62] - 2026-07-06
+
+### Changed
+- Updated README format documentation to include `oklab(...)` and `oklch(...)` examples.
+- Updated README installation instructions and release asset link guidance.
+- Bumped extension version from `0.0.61` to `0.0.62`.
+
+### Fixed
+- Updated integration test setup for HTML and Vue provider conflict tests to stub `window.registerWebviewViewProvider`, preventing activation-time registration failures in test harnesses.
+
+### Notes
+- Small maintenance/docs release.
+- No end-user runtime feature changes.
+
+
 ## [0.0.61] - 2026-07-02
 
 ### Changed
