@@ -166,7 +166,7 @@
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
-    "package-vsix": "npm run package && npx @vscode/vsce package --out bin/$(node -e \"const p=require('./package.json'); console.log(p.name+'-'+p.version+'.vsix')\") --no-update-package-json && rm -f bin/$(node -e \"const p=require('./package.json'); console.log(p.publisher.toLowerCase()+'.'+p.name+'-'+p.version+'.vsix')\")",
+    "package-vsix": "npm run package && rm -f bin/$(node -e \"const p=require('./package.json'); console.log(p.name+'-'+p.version+'.vsix')\") && npx @vscode/vsce package --out bin/$(node -e \"const p=require('./package.json'); console.log(p.name+'-'+p.version+'.vsix')\") --no-update-package-json",
     "analyze-perf-log": "node scripts/analyze-perf-log.js"
   },
   "devDependencies": {
