@@ -3,6 +3,21 @@
 All notable changes to the **ColorBuddy** extension will be documented in this file.
 
 
+## [0.0.61] - 2026-07-02
+
+### Changed
+- Bumped extension version from `0.0.6` to `0.0.61`.
+- Updated the VSIX packaging workflow to remove old VSIX artifacts before creating a new package.
+- Standardized release artifact naming and published `bin/colorbuddy-0.0.61.vsix`.
+
+### Fixed
+- Corrected changelog entries associated with the `0.0.6` release line before cutting `0.0.61`.
+
+### Notes
+- Maintenance/packaging release.
+- No runtime feature changes since `0.0.6`.
+
+
 ## [0.0.6] - 2026-07-02
 
 ### Added
