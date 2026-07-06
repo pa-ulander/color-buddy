@@ -3,6 +3,29 @@
 All notable changes to the **ColorBuddy** extension will be documented in this file.
 
 
+## [0.0.63] - 2026-07-06
+
+### Added
+- Added regression tests for decoration reapplication and HTML rendering edge cases:
+  - reapply decorations on repeated refresh for the same editor
+  - render swatches for color literals inside HTML `<script>` tags
+  - render swatches for HTML CSS variable usage resolved in-document
+
+### Changed
+- Bumped extension version from `0.0.62` to `0.0.63`.
+- Updated release artifact packaging for `colorbuddy-0.0.63.vsix`.
+
+### Fixed
+- Fixed disappearing swatches when switching tabs by ensuring decorations are reapplied during refresh.
+- Fixed missing swatches for color literals inside HTML `<script>` blocks.
+- Fixed missing swatches for `var(--...)` usages in HTML when variables are declared in the same document.
+- Improved CSS variable resolution fallback to use local in-document declarations when registry lookups miss.
+
+### Notes
+- Bugfix/stability release focused on swatch rendering consistency.
+- No breaking changes.
+
+
 ## [0.0.62] - 2026-07-06
 
 ### Changed
