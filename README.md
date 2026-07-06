@@ -73,7 +73,7 @@ Open VSCode and type `ctrl+p`, then type: `ext install PAUlander.colorbuddy`
 
 *Install from vsix binary*
 
-1.  Download [latest vsix binary](https://github.com/pa-ulander/color-buddy/releases/download/v0.0.62/colorbuddy-0.0.62.vsix) or clone this repository and run `npm run package-vsix` to generate your own.
+1.  Download [latest vsix binary](https://github.com/pa-ulander/color-buddy/releases/download/v0.0.63/colorbuddy-0.0.63.vsix) or clone this repository and run `npm run package-vsix` to generate your own.
 2.  In VS Code press `Ctrl+Shift+P` (`Cmd+Shift+P` on macOS) and choose `Extensions: Install from VSIX`.
 3.  Pick the downloaded/generated `.vsix` file and reload the editor when prompted.
 4.  Alternatively, install via CLI with `code --install-extension color-buddy-*.*.*.vsix`.
