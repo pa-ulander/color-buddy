@@ -1730,12 +1730,16 @@ export class ExtensionController implements vscode.Disposable {
 		perfLogger.start('applyCSSVariableDecorations');
 		const editorKey = this.getEditorKey(editor);
 		const existingDecorations = this.stateManager.getDecoration(editorKey);
+		const htmlScriptRanges = this.getHtmlScriptTagRanges(editor.document);
 
 		const decorationRanges: vscode.Range[] = [];
 		const colorsByRange = new Map<string, string>();
 
 		for (const data of colorData) {
-			if ((data.isCssVariable && !data.isWrappedInFunction && !data.isCssVariableDeclaration) || data.isCssClass) {
+			const shouldDecorateCssReference = (data.isCssVariable && !data.isWrappedInFunction && !data.isCssVariableDeclaration) || data.isCssClass;
+			const shouldDecorateHtmlScriptLiteral = this.shouldDecorateHtmlScriptLiteral(editor.document, data, htmlScriptRanges);
+
+			if (shouldDecorateCssReference || shouldDecorateHtmlScriptLiteral) {
 				perfLogger.log('Adding decoration for', {
 					text: data.originalText,
 					line: data.range.start.line,
@@ -1803,20 +1807,10 @@ export class ExtensionController implements vscode.Disposable {
 			});
 
 			let yieldedBetweenChunks = false;
-			const isActiveEditor = vscode.window.activeTextEditor === editor;
 			for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
 				const chunkStart = chunkIndex * DECORATION_CHUNK_SIZE;
 				const chunk = decorationRangesWithOptions.slice(chunkStart, chunkStart + DECORATION_CHUNK_SIZE);
-				const signature = this.computeDecorationChunkSignature(chunk);
-				const existingSignature = this.stateManager.getDecorationChunkSignature(editorKey, chunkIndex);
-				
-				// Always re-apply decorations if this is the active editor (in case of tab switches)
-				// Otherwise, only skip if signature matches (for background editors)
-				if (existingSignature === signature && !isActiveEditor) {
-					continue;
-				}
 				editor.setDecorations(decorationPool[chunkIndex], chunk);
-				this.stateManager.setDecorationChunkSignature(editorKey, chunkIndex, signature);
 
 				if (chunkCount > 1 && chunkIndex < chunkCount - 1) {
 					if (!yieldedBetweenChunks) {
@@ -1834,7 +1828,7 @@ export class ExtensionController implements vscode.Disposable {
 			for (let poolIndex = chunkCount; poolIndex < decorationPool.length; poolIndex++) {
 				editor.setDecorations(decorationPool[poolIndex], []);
 			}
-			this.stateManager.pruneDecorationSnapshots(editorKey, chunkCount);
+			this.stateManager.clearDecorationSnapshots(editorKey);
 		} else {
 			perfLogger.log('No decorations to apply for editor', editor.document.uri.fsPath);
 		}
@@ -1941,12 +1935,54 @@ export class ExtensionController implements vscode.Disposable {
 		await new Promise<void>(resolve => setTimeout(resolve, ms));
 	}
 
-	private computeDecorationChunkSignature(chunk: readonly vscode.DecorationOptions[]): string {
-		return chunk.map(option => {
-			const { range } = option;
-			const color = option.renderOptions?.before?.backgroundColor ?? '';
-			return `${range.start.line}:${range.start.character}:${color}`;
-		}).join('|');
+	private shouldDecorateHtmlScriptLiteral(
+		document: vscode.TextDocument,
+		data: ColorData,
+		scriptRanges: ReadonlyArray<{ start: number; end: number }>
+	): boolean {
+		if (document.languageId !== 'html') {
+			return false;
+		}
+
+		if (data.isCssVariable || data.isCssClass) {
+			return false;
+		}
+
+		const offset = document.offsetAt(data.range.start);
+		return scriptRanges.some(range => offset >= range.start && offset < range.end);
+	}
+
+	private getHtmlScriptTagRanges(document: vscode.TextDocument): Array<{ start: number; end: number }> {
+		if (document.languageId !== 'html') {
+			return [];
+		}
+
+		const text = document.getText();
+		const lowerText = text.toLowerCase();
+		const ranges: Array<{ start: number; end: number }> = [];
+		let searchFrom = 0;
+
+		while (searchFrom < lowerText.length) {
+			const openTagStart = lowerText.indexOf('<script', searchFrom);
+			if (openTagStart === -1) {
+				break;
+			}
+
+			const openTagEnd = lowerText.indexOf('>', openTagStart);
+			if (openTagEnd === -1) {
+				break;
+			}
+
+			const closeTagStart = lowerText.indexOf('</script>', openTagEnd + 1);
+			if (closeTagStart === -1) {
+				break;
+			}
+
+			ranges.push({ start: openTagEnd + 1, end: closeTagStart });
+			searchFrom = closeTagStart + '</script>'.length;
+		}
+
+		return ranges;
 	}
 
 	private getActiveColorAtPosition(colorData: ColorData[], position: vscode.Position): ColorData | undefined {

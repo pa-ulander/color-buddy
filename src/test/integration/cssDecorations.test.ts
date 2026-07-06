@@ -30,6 +30,44 @@ suite('CSS Decorations', () => {
 		}
 	}).timeout(10000);
 
+	test('reapplies decorations on repeated refresh for the same editor', async () => {
+		const { controller, restore } = await createControllerHarness();
+		try {
+			const extensionRoot = vscode.Uri.file(path.join(__dirname, '..', '..', '..'));
+			const uri = vscode.Uri.joinPath(extensionRoot, 'src', 'test', 'integration', 'fixtures', 'css-variable-decorations.css');
+			const document = await vscode.workspace.openTextDocument(uri);
+
+			const firstPass: DecorationCapture[] = [];
+			const secondPass: DecorationCapture[] = [];
+			let currentPass = firstPass;
+
+			const editorStub = {
+				document,
+				setDecorations: (type: vscode.TextEditorDecorationType, options: readonly vscode.DecorationOptions[]) => {
+					currentPass.push({ type, options });
+				}
+			} as unknown as vscode.TextEditor;
+
+			const controllerWithRefresh = controller as unknown as {
+				refreshEditor(editor: vscode.TextEditor): Promise<void>;
+			};
+
+			await controllerWithRefresh.refreshEditor(editorStub);
+			assert.ok(firstPass.length > 0, 'Expected first refresh to apply decorations');
+
+			currentPass = secondPass;
+			await controllerWithRefresh.refreshEditor(editorStub);
+
+			assert.ok(secondPass.length > 0, 'Expected second refresh to re-apply decorations');
+			const secondHasColor = secondPass.some(entry =>
+				entry.options.some(option => option.renderOptions?.before?.backgroundColor)
+			);
+			assert.ok(secondHasColor, 'Expected second refresh to include swatch colors');
+		} finally {
+			restore();
+		}
+	}).timeout(10000);
+
 	test('aligns Tailwind and CSS variable decorations on mixed lines', async () => {
 		const { controller, restore } = await createControllerHarness();
 		try {
@@ -97,6 +135,89 @@ suite('CSS Decorations', () => {
 
 			assert.strictEqual(cssVarUsage.range.start.line, cssVarLineIndex, 'CSS var range line mismatch');
 			assert.strictEqual(cssVarUsage.range.start.character, cssVarColumn, 'CSS var range column mismatch');
+		} finally {
+			restore();
+		}
+	}).timeout(10000);
+
+	test('renders swatches for color literals inside html script tags', async () => {
+		const { controller, restore } = await createControllerHarness();
+		try {
+			const html = [
+				'<html>',
+				'<body>',
+				'<script>',
+				"const primary = '#3b82f6';",
+				"const accent = 'hsl(142, 71%, 45%)';",
+				'</script>',
+				'</body>',
+				'</html>'
+			].join('\n');
+
+			const document = await vscode.workspace.openTextDocument({ language: 'html', content: html });
+
+			const applied: DecorationCapture[] = [];
+			const editorStub = {
+				document,
+				setDecorations: (type: vscode.TextEditorDecorationType, options: readonly vscode.DecorationOptions[]) => {
+					applied.push({ type, options });
+				}
+			} as unknown as vscode.TextEditor;
+
+			await (controller as unknown as { refreshEditor(editor: vscode.TextEditor): Promise<void> }).refreshEditor(editorStub);
+
+			const flattened = applied.flatMap(entry =>
+				entry.options.map(option => ({
+					text: document.getText(option.range),
+					renderOptions: option.renderOptions
+				}))
+			);
+
+			const scriptHex = flattened.find(item => item.text === '#3b82f6');
+			assert.ok(scriptHex, 'Expected swatch for script hex literal in html');
+			assert.ok(scriptHex.renderOptions?.before?.backgroundColor, 'Expected script hex swatch color');
+		} finally {
+			restore();
+		}
+	}).timeout(10000);
+
+	test('renders swatches for css var usage resolved from declarations in the same html document', async () => {
+		const { controller, restore } = await createControllerHarness();
+		try {
+			const html = [
+				'<html>',
+				'<head>',
+				'<style>',
+				':root { --accent-color: #ff5733; }',
+				'.box { border-color: var(--accent-color); }',
+				'</style>',
+				'</head>',
+				'<body><div class="box">Demo</div></body>',
+				'</html>'
+			].join('\n');
+
+			const document = await vscode.workspace.openTextDocument({ language: 'html', content: html });
+
+			const applied: DecorationCapture[] = [];
+			const editorStub = {
+				document,
+				setDecorations: (type: vscode.TextEditorDecorationType, options: readonly vscode.DecorationOptions[]) => {
+					applied.push({ type, options });
+				}
+			} as unknown as vscode.TextEditor;
+
+			await (controller as unknown as { refreshEditor(editor: vscode.TextEditor): Promise<void> }).refreshEditor(editorStub);
+
+			const flattened = applied.flatMap(entry =>
+				entry.options.map(option => ({
+					text: document.getText(option.range),
+					renderOptions: option.renderOptions
+				}))
+			);
+
+			const cssVarUsage = flattened.find(item => item.text === 'var(--accent-color)');
+			assert.ok(cssVarUsage, 'Expected swatch for html css variable usage');
+			assert.ok(cssVarUsage.renderOptions?.before?.backgroundColor, 'Expected html css variable swatch color');
 		} finally {
 			restore();
 		}

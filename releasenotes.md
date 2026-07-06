@@ -1,5 +1,64 @@
 # ColorBuddy Release Notes
 
+## Version 0.0.63 - July 6, 2026
+
+### Swatch Rendering Reliability Update
+
+This release focuses on fixing remaining swatch rendering regressions in real editing workflows, especially around tab switching and HTML mixed-content files.
+
+### What Changed
+
+**Swatch Stability Across Editor Refreshes**
+- Fixed a refresh-path issue where unchanged decoration chunks could skip reapplication and cause swatches to disappear after editor/tab switches.
+- Decorations are now consistently reapplied during refresh so visible swatches stay in sync.
+
+**HTML Rendering Improvements**
+- Added swatch rendering for color literals inside HTML `<script>` tags.
+- Added robust fallback resolution for CSS variables declared in the same HTML document, restoring swatches for usages like `var(--accent-color)` when registry lookups are not yet populated.
+
+**Regression Coverage**
+- Added integration tests to lock in the fixed behaviors:
+  - decoration reapplication on repeated refresh
+  - HTML `<script>` literal swatches
+  - HTML in-document CSS variable swatches
+
+**Release Packaging**
+- Bumped extension version to `0.0.63`.
+- Published release artifact: `colorbuddy-0.0.63.vsix`.
+
+### Why This Matters
+
+Color swatches now remain reliable across common navigation patterns and mixed HTML contexts (`<style>`, inline CSS variable usage, and `<script>`). This reduces visual drift between hover info and inline swatch rendering.
+
+### Upgrading
+
+Update from the VS Code marketplace (or install the `0.0.63` VSIX). No configuration changes are required.
+
+## Version 0.0.62 - July 6, 2026
+
+### Documentation + Test Harness Stability Update
+
+This release publishes the changes committed after `v0.0.61`, primarily documentation refinements plus a small integration-test harness hardening.
+
+### What Changed
+
+**README Improvements**
+- Added explicit `oklab(...)` and `oklch(...)` examples to supported color formats.
+- Refined wording/formatting in configuration guidance for readability.
+- Updated VSIX installation guidance and release link consistency.
+
+**Integration Test Harness Fixes**
+- Updated HTML and Vue color-provider conflict integration tests to mock `window.registerWebviewViewProvider` during controller setup.
+- Prevents test-environment activation failures when webview providers are registered by the extension.
+
+### Why This Matters
+
+Documentation now better reflects currently supported color formats and installation flow, while integration tests are more robust against activation-path registration requirements.
+
+### Upgrading
+
+Update from the VS Code marketplace (or `code --install-extension`). No configuration changes are required.
+
 ## Version 0.0.6 - July 1, 2026
 
 ### OKLab/OKLCH Support + Swatch Accuracy Fixes

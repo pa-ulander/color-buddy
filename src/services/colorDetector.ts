@@ -35,6 +35,7 @@ export class ColorDetector {
     collectColorData(document: vscode.TextDocument, text: string): ColorData[] {
         const results: ColorData[] = [];
         const seenRanges = new Set<string>();
+        const localVariableValues = this.collectLocalVariableValues(text);
 
         // Build a list of comment ranges to exclude
         const commentRanges = this.getCommentRanges(text);
@@ -122,21 +123,30 @@ export class ColorDetector {
         const varRegex = ColorDetector.reset(ColorDetector.CSS_VAR_REGEX);
         let varMatch: RegExpExecArray | null;
         while ((varMatch = varRegex.exec(text)) !== null) {
-            this.collectCSSVariableReference(document, varMatch.index, varMatch[0], varMatch[1], results, seenRanges);
+            this.collectCSSVariableReference(document, varMatch.index, varMatch[0], varMatch[1], results, seenRanges, undefined, localVariableValues);
         }
 
         // Detect CSS variables wrapped in color functions: hsl(var(--variable)), rgb(var(--variable))
         const varInFuncRegex = ColorDetector.reset(ColorDetector.CSS_VAR_IN_FUNC_REGEX);
         let varInFuncMatch: RegExpExecArray | null;
         while ((varInFuncMatch = varInFuncRegex.exec(text)) !== null) {
-            this.collectCSSVariableReference(document, varInFuncMatch.index, varInFuncMatch[0], varInFuncMatch[2], results, seenRanges, varInFuncMatch[1] as 'hsl' | 'hsla' | 'rgb' | 'rgba' | 'oklab' | 'oklch');
+            this.collectCSSVariableReference(
+                document,
+                varInFuncMatch.index,
+                varInFuncMatch[0],
+                varInFuncMatch[2],
+                results,
+                seenRanges,
+                varInFuncMatch[1] as 'hsl' | 'hsla' | 'rgb' | 'rgba' | 'oklab' | 'oklch',
+                localVariableValues
+            );
         }
 
         // Detect Tailwind color classes: bg-primary, text-accent, border-destructive, etc.
         const tailwindClassRegex = ColorDetector.reset(ColorDetector.TAILWIND_CLASS_REGEX);
         let twClassMatch: RegExpExecArray | null;
         while ((twClassMatch = tailwindClassRegex.exec(text)) !== null) {
-            this.collectTailwindClass(document, twClassMatch.index, twClassMatch[0], twClassMatch[2], results, seenRanges, text);
+            this.collectTailwindClass(document, twClassMatch.index, twClassMatch[0], twClassMatch[2], results, seenRanges, text, localVariableValues);
         }
         
         // Detect CSS class names with color properties: plums, bonk, etc.
@@ -164,7 +174,8 @@ export class ColorDetector {
         variableName: string,
         results: ColorData[],
         seenRanges: Set<string>,
-        wrappingFunction?: 'hsl' | 'hsla' | 'rgb' | 'rgba' | 'oklab' | 'oklch'
+        wrappingFunction?: 'hsl' | 'hsla' | 'rgb' | 'rgba' | 'oklab' | 'oklch',
+        localVariableValues?: Map<string, string>
     ): void {
         const range = new vscode.Range(
             document.positionAt(startIndex),
@@ -178,13 +189,21 @@ export class ColorDetector {
 
         // Try to resolve the CSS variable
         const declarations = this.registry.getVariablesSorted(variableName);
-        if (declarations.length === 0) {
-            return;
+
+        let colorValue: string | undefined;
+        if (declarations.length > 0) {
+            const declaration = declarations[0];
+            colorValue = declaration.resolvedValue ?? this.resolveNestedVariables(declaration.value, localVariableValues);
+        } else if (localVariableValues?.has(variableName)) {
+            const rawLocalValue = localVariableValues.get(variableName);
+            if (rawLocalValue) {
+                colorValue = this.resolveNestedVariables(rawLocalValue, localVariableValues);
+            }
         }
 
-        const declaration = declarations[0];
-
-        let colorValue = declaration.resolvedValue ?? this.resolveNestedVariables(declaration.value);
+        if (!colorValue) {
+            return;
+        }
 
         // If wrapped in a color function, prepend it
         if (wrappingFunction) {
@@ -222,7 +241,8 @@ export class ColorDetector {
         colorName: string,
         results: ColorData[],
         seenRanges: Set<string>,
-        sourceText: string
+        sourceText: string,
+        localVariableValues?: Map<string, string>
     ): void {
         // Skip Tailwind matches that are part of CSS variable names like "--accent-foreground"
         if (startIndex >= 2 && sourceText.slice(startIndex - 2, startIndex) === '--') {
@@ -243,14 +263,22 @@ export class ColorDetector {
 
         // Try to resolve the CSS variable
         const declarations = this.registry.getVariablesSorted(variableName);
-        if (declarations.length === 0) {
+
+        let colorValue: string | undefined;
+        if (declarations.length > 0) {
+            const declaration = declarations[0];
+            colorValue = declaration.resolvedValue ?? this.resolveNestedVariables(declaration.value, localVariableValues);
+        } else if (localVariableValues?.has(variableName)) {
+            const rawLocalValue = localVariableValues.get(variableName);
+            if (rawLocalValue) {
+                colorValue = this.resolveNestedVariables(rawLocalValue, localVariableValues);
+            }
+        }
+
+        if (!colorValue) {
             // Class doesn't map to a known CSS variable
             return;
         }
-
-        const declaration = declarations[0];
-
-        let colorValue = declaration.resolvedValue ?? this.resolveNestedVariables(declaration.value);
 
         // Try to parse the resolved value as a color
         const parsed = this.colorParser.parseColor(colorValue);
@@ -327,7 +355,7 @@ export class ColorDetector {
      * Recursively resolve nested CSS variable references.
      * Handles patterns like var(--var1) where --var1: var(--var2).
      */
-    private resolveNestedVariables(value: string, visited = new Set<string>()): string {
+    private resolveNestedVariables(value: string, localVariableValues?: Map<string, string>, visited = new Set<string>()): string {
         const varRegex = /var\(\s*(--[\w-]+)\s*\)/g;
         let resolvedValue = value;
 
@@ -344,12 +372,20 @@ export class ColorDetector {
                 }
 
                 const declarations = this.registry.getVariablesSorted(varName);
-                if (declarations.length === 0) {
+                let nextValue: string | undefined;
+
+                if (declarations.length > 0) {
+                    nextValue = declarations[0].value;
+                } else if (localVariableValues?.has(varName)) {
+                    nextValue = localVariableValues.get(varName);
+                }
+
+                if (!nextValue) {
                     continue;
                 }
 
                 visited.add(varName);
-                const nestedResolved = this.resolveNestedVariables(declarations[0].value, visited);
+                const nestedResolved = this.resolveNestedVariables(nextValue, localVariableValues, visited);
                 visited.delete(varName);
 
                 resolvedValue = resolvedValue.replace(match[0], nestedResolved);
@@ -358,6 +394,23 @@ export class ColorDetector {
         } while (replaced);
 
         return resolvedValue;
+    }
+
+    private collectLocalVariableValues(text: string): Map<string, string> {
+        const localVariables = new Map<string, string>();
+        const declarationRegex = ColorDetector.reset(ColorDetector.CSS_VAR_DECLARATION_REGEX);
+        let declarationMatch: RegExpExecArray | null;
+
+        while ((declarationMatch = declarationRegex.exec(text)) !== null) {
+            const name = declarationMatch[1];
+            const value = declarationMatch[2].replace(/!important\s*$/i, '').trim();
+            if (!value) {
+                continue;
+            }
+            localVariables.set(name, value);
+        }
+
+        return localVariables;
     }
 
     private collectCSSVariableDeclaration(

@@ -2,8 +2,61 @@
 
 All notable changes to the **ColorBuddy** extension will be documented in this file.
 
+## [0.0.63] - 2026-07-06
+
+### Added
+- Added regression tests for decoration reapplication and HTML rendering edge cases:
+  - reapply decorations on repeated refresh for the same editor
+  - render swatches for color literals inside HTML `<script>` tags
+  - render swatches for HTML CSS variable usage resolved in-document
+
+### Changed
+- Bumped extension version from `0.0.62` to `0.0.63`.
+- Updated release artifact packaging for `colorbuddy-0.0.63.vsix`.
+
+### Fixed
+- Fixed disappearing swatches when switching tabs by ensuring decorations are reapplied during refresh.
+- Fixed missing swatches for color literals inside HTML `<script>` blocks.
+- Fixed missing swatches for `var(--...)` usages in HTML when variables are declared in the same document.
+- Improved CSS variable resolution fallback to use local in-document declarations when registry lookups miss.
+
+### Notes
+- Bugfix/stability release focused on swatch rendering consistency.
+- No breaking changes.
+
+
+## [0.0.62] - 2026-07-06
+
+### Changed
+- Updated README format documentation to include `oklab(...)` and `oklch(...)` examples.
+- Updated README installation instructions and release asset link guidance.
+- Bumped extension version from `0.0.61` to `0.0.62`.
+- Improved vsix buid script
+
+### Fixed
+- Updated integration test setup for HTML and Vue provider conflict tests to stub `window.registerWebviewViewProvider`, preventing activation-time registration failures in test harnesses.
+
+### Notes
+- Small maintenance/docs release.
+- No end-user runtime feature changes.
+
 
 ## [0.0.61] - 2026-07-02
+
+### Changed
+- Bumped extension version from `0.0.6` to `0.0.61`.
+- Updated the VSIX packaging workflow to remove old VSIX artifacts before creating a new package.
+- Standardized release artifact naming and published `bin/colorbuddy-0.0.61.vsix`.
+
+### Fixed
+- Corrected changelog entries associated with the `0.0.6` release line before cutting `0.0.61`.
+
+### Notes
+- Maintenance/packaging release.
+- No runtime feature changes since `0.0.6`.
+
+
+## [0.0.6] - 2026-07-02
 
 ### Added
 - **"Display Summary" Quick Action**: New button added as first (leftmost) quick action in hover tooltips that opens the Accessibility Summary panel with complete color details
