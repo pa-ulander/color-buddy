@@ -232,13 +232,15 @@ export class FormatsPanelProvider extends BasePanelProvider {
 
 	private getFormatLabel(format: string): string {
 		switch (format) {
-			case 'hex': return 'Hex';
+			case 'hex': return 'HEX';
 			case 'hexAlpha': return 'Hex (with alpha)';
 			case 'rgb': return 'RGB';
 			case 'rgba': return 'RGBA';
 			case 'hsl': return 'HSL';
 			case 'hsla': return 'HSLA';
 			case 'tailwindHsl': return 'Tailwind HSL';
+			case 'oklab': return 'OKLAB';
+			case 'oklch': return 'OKLCH';
 			default: return format.toUpperCase();
 		}
 	}
