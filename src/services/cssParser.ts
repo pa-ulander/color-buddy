@@ -1,7 +1,8 @@
-import * as vscode from 'vscode';
 import type { CSSVariableDeclaration, CSSClassColorDeclaration, CSSVariableContext } from '../types';
 import type { Registry } from './registry';
 import type { ColorParser } from './colorParser';
+import type { TextSource } from '../utils/textSnapshot';
+import { resolveCssVariableReferences } from '../utils/cssVariableResolution';
 
 /**
  * Service for parsing CSS files and extracting CSS variables and class colors.
@@ -16,7 +17,7 @@ export class CSSParser {
     /**
      * Parse a CSS file and extract CSS variables and class colors.
      */
-    async parseCSSFile(document: vscode.TextDocument): Promise<void> {
+    async parseCSSFile(document: TextSource): Promise<void> {
         const text = document.getText();
 
         const { declarations: variableDeclarations, lookup: localVariables } = this.extractCSSVariables(document, text);
@@ -32,7 +33,7 @@ export class CSSParser {
      * Matches patterns like: --variable-name: value;
      */
     private extractCSSVariables(
-        document: vscode.TextDocument,
+        document: TextSource,
         text: string
     ): { declarations: CSSVariableDeclaration[]; lookup: Map<string, CSSVariableDeclaration[]> } {
         const cssVarRegex = /(--[\w-]+)\s*:\s*([^;]+);/g;
@@ -83,7 +84,7 @@ export class CSSParser {
      * Matches patterns like: .className { color: value; }
      */
     private extractCSSClassColors(
-        document: vscode.TextDocument,
+        document: TextSource,
         text: string,
         localVariables: Map<string, CSSVariableDeclaration[]>
     ): CSSClassColorDeclaration[] {
@@ -133,25 +134,27 @@ export class CSSParser {
      * Looks backwards for the opening brace, then finds the selector before it.
      */
     findContainingSelector(text: string, varIndex: number): string {
-        const beforeVar = text.substring(0, varIndex);
-        const lastOpenBrace = beforeVar.lastIndexOf('{');
-        
+        const lastOpenBrace = varIndex > 0 ? text.lastIndexOf('{', varIndex - 1) : -1;
+
         if (lastOpenBrace === -1) {
             return ':root';
         }
 
-        // Find the selector before the brace
-        const beforeBrace = text.substring(0, lastOpenBrace);
-        const lines = beforeBrace.split('\n');
-        
-        // Go backwards to find the selector
-        for (let i = lines.length - 1; i >= 0; i--) {
-            const line = lines[i].trim();
+        // Walk backwards line by line from the brace without copying/splitting the
+        // whole prefix (that was O(file size) per match and froze the extension host).
+        let lineEnd = lastOpenBrace;
+        while (lineEnd >= 0) {
+            const lineStart = lineEnd === 0 ? 0 : text.lastIndexOf('\n', lineEnd - 1) + 1;
+            const line = text.slice(lineStart, lineEnd).trim();
             if (line && !line.startsWith('/*') && !line.endsWith('*/')) {
                 return line.replace(/\s+/g, ' ').trim();
             }
+            if (lineStart === 0) {
+                break;
+            }
+            lineEnd = lineStart - 1;
         }
-        
+
         return ':root';
     }
 
@@ -210,7 +213,7 @@ export class CSSParser {
     /**
      * Recursively resolve nested CSS variable references.
      * Handles patterns like var(--var1) where --var1: var(--var2).
-     * Includes circular reference detection.
+     * Circular, unknown, or too-deep references are left unresolved.
      */
     resolveNestedVariables(
         value: string,
@@ -219,42 +222,12 @@ export class CSSParser {
             visited?: Set<string>;
         } = {}
     ): string {
-        const varPattern = /var\(\s*(--[\w-]+)\s*\)/g;
-        let resolvedValue = value;
-        const visitedVars = options.visited ?? new Set<string>();
         const localVariables = options.localVariables;
-
-        let replaced = false;
-        do {
-            replaced = false;
-            varPattern.lastIndex = 0;
-            let match: RegExpExecArray | null;
-            while ((match = varPattern.exec(resolvedValue)) !== null) {
-                const nestedVarName = match[1];
-
-                if (visitedVars.has(nestedVarName)) {
-                    console.warn(`[cb] Circular CSS variable reference detected: ${nestedVarName}`);
-                    return value;
-                }
-
-                const nestedDeclaration = this.getPreferredDeclaration(nestedVarName, localVariables);
-                if (!nestedDeclaration) {
-                    continue;
-                }
-
-                const newVisited = new Set(visitedVars);
-                newVisited.add(nestedVarName);
-                const nestedResolved = this.resolveNestedVariables(nestedDeclaration.value, {
-                    localVariables,
-                    visited: newVisited
-                });
-
-                resolvedValue = resolvedValue.replace(match[0], nestedResolved);
-                replaced = true;
-            }
-        } while (replaced);
-        
-        return resolvedValue;
+        return resolveCssVariableReferences(
+            value,
+            name => this.getPreferredDeclaration(name, localVariables)?.value,
+            options.visited
+        );
     }
 
     private getPreferredDeclaration(

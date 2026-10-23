@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { ColorData } from '../types';
 import type { Registry } from './registry';
 import type { ColorParser } from './colorParser';
+import { resolveCssVariableReferences } from '../utils/cssVariableResolution';
 
 /**
  * Service for detecting colors in text documents.
@@ -333,45 +334,11 @@ export class ColorDetector {
      * Recursively resolve nested CSS variable references.
      * Handles patterns like var(--var1) where --var1: var(--var2).
      */
-    private resolveNestedVariables(value: string, localVariableValues?: Map<string, string>, visited = new Set<string>()): string {
-        const varRegex = /var\(\s*(--[\w-]+)\s*\)/g;
-        let resolvedValue = value;
-
-        let replaced: boolean;
-        do {
-            replaced = false;
-            varRegex.lastIndex = 0;
-            let match: RegExpExecArray | null;
-            while ((match = varRegex.exec(resolvedValue)) !== null) {
-                const varName = match[1];
-
-                if (visited.has(varName)) {
-                    continue;
-                }
-
-                const declarations = this.registry.getVariablesSorted(varName);
-                let nextValue: string | undefined;
-
-                if (declarations.length > 0) {
-                    nextValue = declarations[0].value;
-                } else if (localVariableValues?.has(varName)) {
-                    nextValue = localVariableValues.get(varName);
-                }
-
-                if (!nextValue) {
-                    continue;
-                }
-
-                visited.add(varName);
-                const nestedResolved = this.resolveNestedVariables(nextValue, localVariableValues, visited);
-                visited.delete(varName);
-
-                resolvedValue = resolvedValue.replace(match[0], nestedResolved);
-                replaced = true;
-            }
-        } while (replaced);
-
-        return resolvedValue;
+    private resolveNestedVariables(value: string, localVariableValues?: Map<string, string>): string {
+        return resolveCssVariableReferences(value, name => {
+            const declarations = this.registry.getVariablesSorted(name);
+            return declarations.length > 0 ? declarations[0].value : localVariableValues?.get(name);
+        });
     }
 
     private collectLocalVariableValues(text: string): Map<string, string> {

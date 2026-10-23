@@ -68,6 +68,16 @@ suite('CSS Watcher Integration', () => {
 			await originalParse(document);
 		};
 
+		const workspaceOpenNamespace = vscode.workspace as unknown as { openTextDocument: typeof vscode.workspace.openTextDocument };
+		const originalOpenTextDocument = workspaceOpenNamespace.openTextDocument;
+		const openedUris: string[] = [];
+		workspaceOpenNamespace.openTextDocument = (async (arg?: unknown) => {
+			if (arg instanceof vscode.Uri) {
+				openedUris.push(arg.toString());
+			}
+			return originalOpenTextDocument(arg as Parameters<typeof vscode.workspace.openTextDocument>[0]);
+		}) as typeof vscode.workspace.openTextDocument;
+
 		try {
 			await controller.activate();
 			assert.ok(captured.create, 'Expected CSS watcher to register create handler');
@@ -96,7 +106,9 @@ suite('CSS Watcher Integration', () => {
 			const declarationsAfterDelete = controllerAny.registry.getVariable('--watch-color');
 			assert.strictEqual(declarationsAfterDelete, undefined, 'Expected registry to drop CSS variable after delete event');
 			assert.ok(parseInvocations >= baselineInvocations + 2, 'Expected delete handler to avoid additional parse invocation');
+			assert.ok(!openedUris.includes(tempUri.toString()), 'Watcher events must not open text documents');
 		} finally {
+			workspaceOpenNamespace.openTextDocument = originalOpenTextDocument;
 			controllerAny.cssParser.parseCSSFile = originalParse;
 			commandsNamespace.registerCommand = originalRegisterCommand;
 			workspaceNamespace.createFileSystemWatcher = originalCreateFileSystemWatcher;

@@ -242,6 +242,26 @@ suite('ColorDetector Service', () => {
             assert.ok(results[0].normalizedColor);
         });
 
+        test('should terminate on circular CSS variable references', () => {
+            const context: CSSVariableContext = { type: 'root', specificity: 0 };
+            const make = (name: string, value: string): CSSVariableDeclaration => ({
+                name,
+                value,
+                uri: vscode.Uri.parse('file:///test.css'),
+                line: 0,
+                selector: ':root',
+                context
+            });
+            registry.addVariable('--a', make('--a', 'var(--b)'));
+            registry.addVariable('--b', make('--b', 'var(--c)'));
+            registry.addVariable('--c', make('--c', 'var(--b)'));
+
+            const doc = createMockDocument('color: var(--a); background: var(--b);');
+            const results = detector.collectColorData(doc, doc.getText());
+
+            assert.strictEqual(results.length, 0);
+        });
+
         test('should detect CSS variable declaration with hex color', () => {
             const doc = createMockDocument(':root { --primary: #ff0000; }');
             const results = detector.collectColorData(doc, doc.getText());

@@ -15,6 +15,8 @@ import {
 	LOG_PREFIX
 } from '../utils/constants';
 import { perfLogger } from '../utils/performanceLogger';
+import { createTextSnapshot } from '../utils/textSnapshot';
+import type { TextSource } from '../utils/textSnapshot';
 import { t, LocalizedStrings } from '../l10n/localization';
 import { Registry } from './registry';
 import { Cache } from './cache';
@@ -198,8 +200,8 @@ export class ExtensionController implements vscode.Disposable {
 	 */
 	private async handleCSSFileChange(uri: vscode.Uri): Promise<void> {
 		try {
-			const document = await vscode.workspace.openTextDocument(uri);
-			await this.cssParser.parseCSSFile(document);
+			const source = await this.readCSSSource(uri);
+			await this.cssParser.parseCSSFile(source);
 			this.refreshVisibleEditors();
 		} catch (error) {
 			console.error(`${LOG_PREFIX} failed to handle CSS file change for ${uri.fsPath}`, error);
@@ -1087,19 +1089,36 @@ export class ExtensionController implements vscode.Disposable {
 		for (const fileUri of cssFiles) {
 			try {
 				perfLogger.start('parseCSSFile');
-				const document = await vscode.workspace.openTextDocument(fileUri);
-				await this.cssParser.parseCSSFile(document);
+				const source = await this.readCSSSource(fileUri);
+				await this.cssParser.parseCSSFile(source);
 				perfLogger.end('parseCSSFile');
 			} catch (error) {
 				console.error(
 					`${LOG_PREFIX} ${t(LocalizedStrings.EXTENSION_ERROR_CSS_INDEXING, fileUri.fsPath, String(error))}`
 				);
 			}
+			// Yield so other extensions sharing the extension host (git, language features) keep running.
+			await new Promise<void>(resolve => setImmediate(resolve));
 		}
 
 		perfLogger.log('Total CSS variables indexed', this.registry.variableCount);
 		perfLogger.log('Total CSS classes indexed', this.registry.classCount);
 		perfLogger.end('indexWorkspaceCSSFiles');
+	}
+
+	/**
+	 * Get CSS text for indexing without opening a text document. Opening documents
+	 * fires onDidOpenTextDocument for every extension/language server, so we reuse an
+	 * already-open document or read the file straight from disk.
+	 */
+	private async readCSSSource(uri: vscode.Uri): Promise<TextSource> {
+		const key = uri.toString();
+		const openDocument = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === key);
+		if (openDocument) {
+			return openDocument;
+		}
+		const bytes = await vscode.workspace.fs.readFile(uri);
+		return createTextSnapshot(uri, new TextDecoder('utf-8').decode(bytes));
 	}
 
 	/**
