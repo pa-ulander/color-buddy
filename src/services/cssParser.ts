@@ -1,7 +1,7 @@
-import * as vscode from 'vscode';
 import type { CSSVariableDeclaration, CSSClassColorDeclaration, CSSVariableContext } from '../types';
 import type { Registry } from './registry';
 import type { ColorParser } from './colorParser';
+import type { TextSource } from '../utils/textSnapshot';
 
 /**
  * Service for parsing CSS files and extracting CSS variables and class colors.
@@ -16,7 +16,7 @@ export class CSSParser {
     /**
      * Parse a CSS file and extract CSS variables and class colors.
      */
-    async parseCSSFile(document: vscode.TextDocument): Promise<void> {
+    async parseCSSFile(document: TextSource): Promise<void> {
         const text = document.getText();
 
         const { declarations: variableDeclarations, lookup: localVariables } = this.extractCSSVariables(document, text);
@@ -32,7 +32,7 @@ export class CSSParser {
      * Matches patterns like: --variable-name: value;
      */
     private extractCSSVariables(
-        document: vscode.TextDocument,
+        document: TextSource,
         text: string
     ): { declarations: CSSVariableDeclaration[]; lookup: Map<string, CSSVariableDeclaration[]> } {
         const cssVarRegex = /(--[\w-]+)\s*:\s*([^;]+);/g;
@@ -83,7 +83,7 @@ export class CSSParser {
      * Matches patterns like: .className { color: value; }
      */
     private extractCSSClassColors(
-        document: vscode.TextDocument,
+        document: TextSource,
         text: string,
         localVariables: Map<string, CSSVariableDeclaration[]>
     ): CSSClassColorDeclaration[] {
@@ -133,25 +133,27 @@ export class CSSParser {
      * Looks backwards for the opening brace, then finds the selector before it.
      */
     findContainingSelector(text: string, varIndex: number): string {
-        const beforeVar = text.substring(0, varIndex);
-        const lastOpenBrace = beforeVar.lastIndexOf('{');
-        
+        const lastOpenBrace = varIndex > 0 ? text.lastIndexOf('{', varIndex - 1) : -1;
+
         if (lastOpenBrace === -1) {
             return ':root';
         }
 
-        // Find the selector before the brace
-        const beforeBrace = text.substring(0, lastOpenBrace);
-        const lines = beforeBrace.split('\n');
-        
-        // Go backwards to find the selector
-        for (let i = lines.length - 1; i >= 0; i--) {
-            const line = lines[i].trim();
+        // Walk backwards line by line from the brace without copying/splitting the
+        // whole prefix (that was O(file size) per match and froze the extension host).
+        let lineEnd = lastOpenBrace;
+        while (lineEnd >= 0) {
+            const lineStart = lineEnd === 0 ? 0 : text.lastIndexOf('\n', lineEnd - 1) + 1;
+            const line = text.slice(lineStart, lineEnd).trim();
             if (line && !line.startsWith('/*') && !line.endsWith('*/')) {
                 return line.replace(/\s+/g, ' ').trim();
             }
+            if (lineStart === 0) {
+                break;
+            }
+            lineEnd = lineStart - 1;
         }
-        
+
         return ':root';
     }
 
