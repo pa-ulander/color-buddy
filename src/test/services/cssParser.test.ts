@@ -77,5 +77,33 @@ suite('CSSParser', () => {
 			// Previously quadratic (tens of seconds); must stay far below that so the shared extension host is not starved.
 			assert.ok(elapsed < 5000, `Expected large stylesheet to parse quickly, took ${elapsed}ms`);
 		}).timeout(60000);
+
+		test('terminates on variable cycles that do not include the declaration being resolved', async () => {
+			const { parser, registry } = createParser();
+			const css = ':root {\n  --a: var(--b);\n  --b: var(--c);\n  --c: var(--b);\n  --ok: var(--base);\n  --base: #ff0000;\n}\n.x {\n  color: var(--b);\n}\n';
+			await parser.parseCSSFile(createTextSnapshot(vscode.Uri.file('/workspace/styles/cycle.css'), css));
+
+			assert.ok(registry.getVariable('--a'), 'Expected --a to be indexed');
+			assert.strictEqual(registry.getVariable('--ok')?.[0].resolvedValue, '#ff0000');
+		});
+	});
+
+	suite('resolveNestedVariables', () => {
+		test('leaves circular references unresolved instead of looping', async () => {
+			const { parser } = createParser();
+			const css = ':root {\n  --b: var(--c);\n  --c: var(--b);\n}\n';
+			await parser.parseCSSFile(createTextSnapshot(vscode.Uri.file('/workspace/styles/cycle2.css'), css));
+
+			const result = parser.resolveNestedVariables('var(--b)');
+			assert.ok(result.includes('var(--'), `Expected unresolved reference, got ${result}`);
+		});
+
+		test('resolves deep chains and multiple references', async () => {
+			const { parser } = createParser();
+			const css = ':root {\n  --h: 210;\n  --s: 40%;\n  --l: var(--l2);\n  --l2: 50%;\n}\n';
+			await parser.parseCSSFile(createTextSnapshot(vscode.Uri.file('/workspace/styles/chain.css'), css));
+
+			assert.strictEqual(parser.resolveNestedVariables('hsl(var(--h) var(--s) var(--l))'), 'hsl(210 40% 50%)');
+		});
 	});
 });
