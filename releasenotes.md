@@ -1,5 +1,36 @@
 # ColorBuddy Release Notes
 
+## Version 0.0.64 - October 23, 2026
+
+### CSS Indexing and Stability Update
+
+This release improves workspace indexing responsiveness and makes CSS variable resolution safe for circular or unusually deep references.
+
+### What Changed
+
+**Faster, Less Disruptive CSS Indexing**
+- Fixed a performance issue that could stall VS Code language indexing and the Source Control view in large workspaces.
+- CSS selector lookup now runs in linear time rather than repeatedly splitting the full document.
+- Workspace and watched CSS files are read from disk when they are not already open, instead of opening every file as an editor document.
+- Indexing yields between files and skips version-control metadata, dependency folders, virtual environments, and VS Code test data.
+
+**Reliable CSS Variable Resolution**
+- Added bounded, memoized resolution for nested CSS variable references.
+- Circular and unresolved references remain unresolved instead of causing repeated scans or hanging the extension host.
+- Added regression tests for circular references, unresolved variables, deep chains, disk-based indexing, and selector parsing.
+
+**Development and Packaging Updates**
+- Updated the VS Code test runner and VSIX packager; development and packaging now require Node.js 22 or newer.
+- Published the `colorbuddy-0.0.64.vsix` release artifact.
+
+### Why This Matters
+
+Large workspaces should remain responsive while ColorBuddy indexes CSS, and unusual variable-reference graphs can no longer trap indexing in repeated resolution loops. The indexing and resolution changes are covered by regression tests.
+
+### Upgrading
+
+Update from the VS Code Marketplace or install the `0.0.64` VSIX. No extension configuration changes are required. Node.js 22 or newer is needed for development and packaging, not for using the extension.
+
 ## Version 0.0.63 - July 6, 2026
 
 ### Swatch Rendering Reliability Update
@@ -361,4 +392,3 @@ We'd love to hear from you! If you have suggestions, feature requests, or encoun
 ## License
 
 MIT License - See LICENSE file for details
-
