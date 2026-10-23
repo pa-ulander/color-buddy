@@ -6,6 +6,10 @@ All notable changes to the **ColorBuddy** extension will be documented in this f
 
 ### Fixed
 - ColorBuddy no longer stalls VS Code language indexing or the Source Control view: CSS indexing is now linear-time, reads files from disk instead of opening them as editor documents, yields between files, and skips `.git`/virtualenv folders.
+- Removed vulnerable `braces` dependency chains by updating the development test runner and VSIX packager.
+
+### Changed
+- Updated `@vscode/test-cli` to `0.0.15` and `@vscode/vsce` to `4.0.0`; development and packaging require Node.js 22 or newer.
 
 ## [0.0.63] - 2026-07-06
 
