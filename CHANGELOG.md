@@ -4,6 +4,8 @@ All notable changes to the **ColorBuddy** extension will be documented in this f
 
 ## [Unreleased]
 
+## [0.0.64] - 2026-10-23
+
 ### Fixed
 - ColorBuddy no longer stalls VS Code language indexing or the Source Control view: CSS indexing is now linear-time, reads files from disk instead of opening them as editor documents, yields between files, and skips `.git`/virtualenv folders.
 - Removed vulnerable `braces` dependency chains by updating the development test runner and VSIX packager.
