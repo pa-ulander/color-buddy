@@ -202,6 +202,9 @@ export const TAILWIND_HSL_PATTERN = /(?<![\w#(.])([0-9]+(?:\.[0-9]+)?\s+[0-9]+(?
 /** Pattern for matching CSS variable references */
 export const CSS_VAR_PATTERN = /var\(\s*(--[\w-]+)\s*\)/g;
 
+/** Maximum nesting depth when resolving var(--x) chains; deeper references are left unresolved */
+export const MAX_CSS_VAR_RESOLUTION_DEPTH = 32;
+
 /** Pattern for matching CSS variables wrapped in color functions */
 export const CSS_VAR_IN_FUNCTION_PATTERN = /\b(hsl|hsla|rgb|rgba|oklab|oklch)\(\s*var\(\s*(--[\w-]+)\s*\)\s*\)/gi;
 
