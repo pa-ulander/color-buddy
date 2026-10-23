@@ -14,7 +14,7 @@ export const MAX_CSS_FILES = 100;
 export const CSS_FILE_PATTERN = '**/*.css';
 
 /** Glob pattern for excluding directories from CSS file search (VCS metadata, dependencies, virtualenvs) */
-export const EXCLUDE_PATTERN = '**/{node_modules,bower_components,.git,.venv,venv}/**';
+export const EXCLUDE_PATTERN = '**/{node_modules,bower_components,.git,.venv,venv,.vscode-test}/**';
 
 // ============================================================================
 // Decoration Constants
